@@ -1,0 +1,994 @@
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.15.1/dist/phaser-arcade-physics.min.js"></script>
+<script>
+
+var config = {
+    width: 1200,
+    height: 500,
+    type: Phaser.AUTO,
+    scene: {
+        preload: preload,
+        create: create,
+        update: update
+    },
+    backgroundColor: '#FFFFFF',
+    pixelArt: false // Enable texture smoothing
+};
+
+var bgConfig = {
+    scale: 1,
+    x: 0,
+    y: 0,
+    originX: 0,
+    originY: 0
+};
+
+var sliderConfig = {
+    handle: {
+        scale: 0.25,
+        originX: 0.5,
+        originY: 0.5,
+        slideLeftX: 102,
+        slideRightX: 372
+    },
+    sliders: {
+        thrustHandle: { // newtons but labelled in kN
+            y: 337,
+            minVal: 200000,
+            maxVal: 600000,
+            startVal: 500000
+        },
+        massHandle: { // kg but labelled in tonnes
+            y: 443,
+            minVal: 20000,
+            maxVal: 50000,
+            startVal: 40000
+        }      
+    },
+    track: {
+        lineThickness: 4,
+        lineTint: '0xFFA218' //orange
+    }
+};
+
+let vectorsConfig = {
+    lengthScale: 0.0003,
+    zeroSensitivity: 10, // counts as zero if force is this close to zero
+    start: {
+        x: 570,  // was 530
+        y: 280
+    },
+    arrows: { //images
+        scale: 1,
+        originX: 0.5,
+        originY: 1
+    },
+    IDText: { //images
+        x: 1000,
+        y: 300,
+        scale: 1,
+        originX: 0.5,
+        originY: 0.5,
+        distance: 30 //from vector line       
+    },
+    mg: {
+        lineThickness: 8,
+        lineTint: '0xFFA218', //orange
+        arrow: 'vectorArrowOrange-img',
+        label: 'mgText-img',
+        alpha: 1,
+        arrowNudge: 0,
+        annotationOffset: 35,
+        depth: 10
+    },
+    T: {
+        lineThickness: 8,
+        lineTint: '0xFFA218', //orange
+        arrow: 'vectorArrowOrange-img',
+        label: 'Ttext-img',
+        alpha: 1,
+        arrowNudge: 0,
+        annotationOffset: -40,
+        depth: 10
+    },
+    R: { // resultant
+        lineThickness: 16,
+        lineTint: '0xFF0000', //red
+        arrow: 'vectorArrowRed-img', //'vectorArrowRed-img',
+        label: null,  //'RText-img'
+        alpha: 0.5,
+        arrowNudge: 0,
+        annotationOffset: 20,
+        depth: 20
+    }
+};
+
+const uiConfig = {
+    playControls: {
+        depth: 500,
+        playPause: {
+            x: 453, //
+            y: 57, // was 140
+            originX: 0.5,
+            originY: 0.5            
+        },
+        reset: {
+            x: 510,  //
+            y: 57,  // was 200
+            originX: 0.5,
+            originY: 0.5          
+        }
+    }
+}
+
+const contoursConfig = {
+    startHeight: 0, // in metres
+    maxHeight: 10000, // in meters - this just needs to be higher than the rocket will ever get
+    interval: 500, // in meters
+    groundY: 500, // where to stop the 0 m contour
+    pixelInterval: 200, // in pixels was 500
+    visibleTop: 109, // y coordinate of top of region where contours are visible
+    visibleBottom: 458, // y coordinate of bottom of region where contours are visible
+    lineThickness: 2,
+    lineTint: '0eF650DA',
+    fontSize: 14,
+    font: 'Calibri',
+    textTint: '#F650DA',
+    textGap: 10, // text is to left of contour - this gap between right end of text and left end of contour
+    firstContourY: 360, // y coordinate of the 0 m contour
+    leftX: 476, // contour line left coordinate
+    rightX: 652
+}
+
+const graphConfig = {
+    topLeftX: 688,
+    topLeftY: 43,
+    bottomRightX: 1151,
+    bottomRightY: 451,
+    yMaxValue: 1600, // velocity in m/s from values.v
+    xMaxValue: 300,  // time in seconds from values.t
+    lineTint: '0xFFA218', //orange
+    lineThickness: 4
+}
+
+const calcConfig = {
+    secondsPerTick: 0.02, // these are not 'real' seconds - just those used in calculations was 0.05
+    vectorPixelScale: 0.0005 // to scale force in newtons to the length of an arrow - typical force 500,000 N
+}
+
+const visualizationConfig = {
+    rocket: {
+        x: 570,
+        y: 250,
+        originX: 0.5,
+        originY: 0.5,
+        depth: 5
+    }
+}
+
+const g = 10 // N/kg or m/s2
+
+let values = {
+    m: sliderConfig.sliders.massHandle.startVal, // kg
+    W: sliderConfig.sliders.massHandle.startVal * g, // weight stays constant unless mass slider is dragged
+    T: sliderConfig.sliders.thrustHandle.startVal, // Thrust in N
+    R: sliderConfig.sliders.thrustHandle.startVal - (sliderConfig.sliders.massHandle.startVal * g), //resultant force is equal to thrust - weight
+    v: 0,
+    a: g,
+    t: 0
+};
+
+const valueKeysMapping = {
+    'massHandle': 'm',
+    'thrustHandle': 'T'
+};
+
+let game = new Phaser.Game(config);
+let sliders = [];
+let playStatus = 'paused'; // values 'playing' and 'paused'
+let started = false;
+
+let background;
+
+let visualization;
+let calculation;
+let ui;
+let contours;
+let graph;
+
+class Test {
+    constructor(scene, x, y) {
+        this.scene = scene;
+        this.x = x;
+        this.y = y;
+        this.handle = null;
+    }
+
+    create() {
+
+        // Create the handle image with 50% alpha
+        this.handle = this.scene.add.image(this.x, this.y, 'handle');
+        this.handle.setAlpha(0.5);
+        this.handle.setScale(0.2); // Scale the handle to 20%
+        this.handle.setInteractive({ useHandCursor: true });
+
+        // Make the handle draggable
+        this.scene.input.setDraggable(this.handle);
+
+        // Output the coordinates to the console when dragging
+        this.handle.on('drag', (pointer, dragX, dragY) => {
+            this.handle.setPosition(dragX, dragY);
+            console.log(`x: ${dragX}, y: ${dragY}`);
+        });
+    }
+}
+
+class Graph {
+    constructor(scene) {
+        this.scene = scene;
+        this.previousPoint = null; // Store the previous point to connect to the new point
+        this.graphTexture = null; // The texture object representing the graph
+    }
+
+    create() {
+        // Create a RenderTexture instead of Graphics
+        this.graphTexture = this.scene.add.renderTexture(
+            graphConfig.topLeftX,
+            graphConfig.topLeftY,
+            graphConfig.bottomRightX - graphConfig.topLeftX,
+            graphConfig.bottomRightY - graphConfig.topLeftY
+        );
+        // Reset to ensure the graph starts fresh
+        this.reset();
+    }
+
+    updateGraph() {
+        // Calculate the new x and y coordinates for the graph
+        const xValue = Phaser.Math.Clamp(values.t, 0, graphConfig.xMaxValue);
+        const yValue = Phaser.Math.Clamp(values.v, 0, graphConfig.yMaxValue);
+
+        // Convert the velocity and time to the graph's pixel space
+        const xPixel = Phaser.Math.Linear(
+            0,
+            this.graphTexture.width,
+            xValue / graphConfig.xMaxValue
+        );
+        const yPixel = Phaser.Math.Linear(
+            this.graphTexture.height,
+            0,
+            yValue / graphConfig.yMaxValue
+        );
+
+        // If this is the first point, just store it; don't draw a line yet
+        if (!this.previousPoint) {
+            this.previousPoint = { x: xPixel, y: yPixel };
+        } else {
+            // Draw the line on the RenderTexture using a temporary Graphics object
+            const tempGraphics = this.scene.add.graphics();
+            tempGraphics.lineStyle(graphConfig.lineThickness, parseInt(graphConfig.lineTint, 16));
+            tempGraphics.beginPath();
+            tempGraphics.moveTo(this.previousPoint.x, this.previousPoint.y);
+            tempGraphics.lineTo(xPixel, yPixel);
+            tempGraphics.closePath();
+            tempGraphics.strokePath();
+            
+            // Stamp the graphics onto the render texture and then destroy the temporary graphics
+            this.graphTexture.draw(tempGraphics);
+            tempGraphics.destroy();
+
+            // Update the previous point to the current one
+            this.previousPoint = { x: xPixel, y: yPixel };
+        }
+    }
+
+    reset() {
+        // Clear the graph and reset the previous point
+        this.graphTexture.clear();
+        this.previousPoint = null;
+    }
+}
+
+class Contours {
+    constructor(scene) {
+        this.scene = scene;
+        this.contourPositions = []; // Array to store the y positions of each contour
+        this.contourLines = []; // Array to store the contour line objects
+        this.contourLabels = []; // Array to store the contour label objects
+
+        // Calculate the velocity scale dynamically
+        this.velocityScale = contoursConfig.pixelInterval * calcConfig.secondsPerTick / contoursConfig.interval;
+    }
+
+    create() {
+        // Initialize the contour positions
+        this.initializeContours();
+    }
+
+    initializeContours() {
+        const numContours = contoursConfig.startHeight / contoursConfig.interval;
+        for (let i = 0; i <= numContours; i++) {
+            // Calculate y position based on the pixelInterval
+            const yPosition = contoursConfig.firstContourY + (i * contoursConfig.pixelInterval);
+            this.contourPositions.push(yPosition);
+
+            // Create contour line graphics
+            const lineGraphics = this.scene.add.graphics();
+            lineGraphics.lineStyle(contoursConfig.lineThickness, parseInt(contoursConfig.lineTint, 16));
+            lineGraphics.moveTo(contoursConfig.leftX, yPosition);
+            lineGraphics.lineTo(contoursConfig.rightX, yPosition);
+            lineGraphics.strokePath();
+            lineGraphics.setVisible(true); // Make the line visible
+            this.contourLines.push(lineGraphics);
+
+            // Create contour label
+            const labelText = `${contoursConfig.startHeight - i * contoursConfig.interval} m`;
+            const label = this.scene.add.text(
+                contoursConfig.leftX - contoursConfig.textGap, 
+                yPosition, 
+                labelText, 
+                {
+                    fontSize: `${contoursConfig.fontSize}px`, 
+                    fontFamily: contoursConfig.font, 
+                    color: contoursConfig.textTint
+                }
+            ).setOrigin(1, 0.5); // Align text to the right
+            label.setVisible(true); // Make the label visible
+            this.contourLabels.push(label);
+        }
+    }
+
+    reset() {
+        // Reset the positions of all contours to their initial positions
+        for (let i = 0; i < this.contourPositions.length; i++) {
+            // Recalculate the initial y position for each contour
+            const yPosition = contoursConfig.firstContourY + (i * contoursConfig.pixelInterval);
+            this.contourPositions[i] = yPosition;
+
+            // Update the position of the line and label
+            this.contourLines[i].clear();
+            this.contourLines[i].lineStyle(contoursConfig.lineThickness, parseInt(contoursConfig.lineTint, 16));
+            this.contourLines[i].moveTo(contoursConfig.leftX, yPosition);
+            this.contourLines[i].lineTo(contoursConfig.rightX, yPosition);
+            this.contourLines[i].strokePath();
+            this.contourLines[i].setVisible(true); // Ensure the line is visible
+
+            this.contourLabels[i].setY(yPosition);
+            this.contourLabels[i].setVisible(true); // Ensure the label is visible
+        }
+    }
+
+    updatePositions() {
+        const pixelVelocity = values.v * this.velocityScale;  // Use the dynamically calculated velocity scale
+
+        for (let i = 0; i < this.contourPositions.length; i++) {
+            this.contourPositions[i] -= pixelVelocity; // Decrease y-position to move contours up the screen
+
+            // Clear the previous line and redraw it at the new position
+            const lineGraphics = this.contourLines[i];
+            lineGraphics.clear();
+            lineGraphics.lineStyle(contoursConfig.lineThickness, parseInt(contoursConfig.lineTint, 16));
+            lineGraphics.moveTo(contoursConfig.leftX, this.contourPositions[i]);
+            lineGraphics.lineTo(contoursConfig.rightX, this.contourPositions[i]);
+            lineGraphics.strokePath();
+
+            // Update the position of the label
+            this.contourLabels[i].setY(this.contourPositions[i]);
+
+            // Check if the contour is within the visible area and update visibility
+            if (this.contourPositions[i] < contoursConfig.visibleTop || this.contourPositions[i] > contoursConfig.visibleBottom) {
+                lineGraphics.setVisible(false);
+                this.contourLabels[i].setVisible(false);
+            } else {
+                lineGraphics.setVisible(true);
+                this.contourLabels[i].setVisible(true);
+            }
+
+            lineGraphics.setDepth(2); // Ensure the line is on the correct depth layer
+
+            // Check if the emergency contour has reached the skydiver's y-position
+            if (i === this.emergencyContourIndex && this.contourPositions[i] <= skyDiverConfig.y) {
+                visualization.emergencyOpen();  // Trigger the emergency parachute open
+            }
+
+            // Check if the 0 m contour has reached the ground y-position
+            if (i === this.zeroContourIndex && this.contourPositions[i] <= contoursConfig.groundY) {
+                visualization.land();  // Trigger the landing sequence
+                break;  // No need to check further if landed
+            }
+        }
+    }
+}
+
+class Calculation {   
+    constructor(scene) {
+        this.scene = scene; //just used for scratch drawing
+    }
+
+    calculateWeight() { // needed when mass slider is changed
+        let W;
+        let m = values.m;
+
+        W = m * g; // g is declared as a standalone global variable
+
+        values.W = W;
+    }
+
+    calculateUnbalancedForce() {
+        let R;
+        let W = values.W;
+        let T = values.T;
+
+        R = T - W;
+
+        values.R = R;
+    }
+
+    calculateAcceleration() {
+        let a;
+        let F = values.R;
+        let m = values.m;
+
+        a = F/m;
+
+        values.a = a;
+    }
+
+    calculateNewVelocity() {
+        let v;
+        let u = values.v;
+        let a = values.a;
+        let t = calcConfig.secondsPerTick;
+
+        v = u + (a * t);
+
+        values.v = v;
+    }
+}
+
+class Visualization {
+    constructor(scene) {
+        this.scene = scene;
+        this.currentImage = null;  // Store the currently displayed image
+        this.message = null;
+        this.mgVector = null;
+        this.TVector = null;
+        this.RVector = null;
+        this.config = vectorsConfig;
+        this.vectorStartX = vectorsConfig.start.x;
+        this.vectorStartY = vectorsConfig.start.y;
+    }
+
+    create() {
+
+        let endY;
+
+        // Place the rocket using the config info
+        this.rocketImage = this.scene.add.image(
+            visualizationConfig.rocket.x, 
+            visualizationConfig.rocket.y, 
+            'rocket-img'
+        );
+        this.rocketImage.setOrigin(
+            visualizationConfig.rocket.originX, 
+            visualizationConfig.rocket.originY
+        );
+        this.rocketImage.setDepth(visualizationConfig.rocket.depth);
+
+        // Create the three vectors
+        endY = this.findVectorEndY('mg');
+        this.mgVector = new Vector(this.scene, 'mg', this.vectorStartX, this.vectorStartY, this.vectorStartX, endY, this.config.mg.arrow, this.config.mg.label, this.config.mg.alpha, this.config.mg.arrowNudge, this.config.mg.annotationOffset, this.config.mg.depth);
+        this.mgVector.create();
+
+        endY = this.findVectorEndY('T');
+        this.TVector = new Vector(this.scene, 'T', this.vectorStartX, this.vectorStartY, this.vectorStartX, endY, this.config.T.arrow, this.config.T.label, this.config.T.alpha, this.config.T.arrowNudge, this.config.T.annotationOffset, this.config.T.depth);
+        this.TVector.create();
+        if (values.T === 0) {
+            this.manageVectorVisibility(this.TVector, false);
+        } else {
+            this.manageVectorVisibility(this.TVector, true);
+        }
+
+        endY = this.findVectorEndY('R');
+        this.RVector = new Vector(this.scene, 'R', this.vectorStartX, this.vectorStartY, this.vectorStartX, endY, this.config.R.arrow, this.config.R.label, this.config.R.alpha, this.config.R.arrowNudge, this.config.R.annotationOffset, this.config.R.depth);
+        this.RVector.create();
+    }
+
+    findVectorEndY(vectorType) {
+
+        const scale = vectorsConfig.lengthScale;
+        let length;
+        let endY;
+
+        switch (vectorType) {
+            case 'mg':
+                length = values.W * scale;
+                endY = vectorsConfig.start.y + length;
+                break;
+
+            case 'T':
+                length = values.T * scale;
+                endY = vectorsConfig.start.y - length;
+                break;
+
+            case 'R':
+                length = values.R * scale;
+                endY = vectorsConfig.start.y - length;
+                break;
+        }
+
+        return endY;
+    }
+
+    updateOnSliderDrag(sliderType) {
+
+        calculation.calculateWeight();
+        calculation.calculateUnbalancedForce();
+
+        let endY;
+
+        endY = this.findVectorEndY('T');
+        this.TVector.endY = endY;
+        this.TVector.updateGraphics();
+
+        endY = this.findVectorEndY('mg');
+        this.mgVector.endY = endY;
+        this.mgVector.updateGraphics();
+
+        endY = this.findVectorEndY('R');
+        this.RVector.endY = endY;
+        this.RVector.updateGraphics();
+
+    }
+
+    updateOnTick() {
+        calculation.calculateUnbalancedForce();
+        calculation.calculateAcceleration();
+        calculation.calculateNewVelocity();
+
+        //console.log(values.v);
+
+        values.t += calcConfig.secondsPerTick;
+
+        //update vectors
+        let endY;
+
+        endY = this.findVectorEndY('mg');
+        this.mgVector.endY = endY;
+        this.mgVector.updateGraphics();
+
+        endY = this.findVectorEndY('T');
+        this.TVector.endY = endY;
+        this.TVector.updateGraphics();
+
+        endY = this.findVectorEndY('R');
+        this.RVector.endY = endY;
+        this.RVector.updateGraphics();
+
+        if (values.T === 0) {
+            this.manageVectorVisibility(this.TVector, false);
+        } else {
+            this.manageVectorVisibility(this.TVector, true);
+        }
+
+        if (Math.abs(values.R) < vectorsConfig.zeroSensitivity) {
+            this.manageVectorVisibility(this.RVector, false);
+        } else {
+            this.manageVectorVisibility(this.RVector, true);
+        }
+
+        contours.updatePositions();
+        graph.updateGraph();
+    }
+
+    resetSimulation() {
+        started = false;
+
+        values.m = sliderConfig.sliders.massHandle.startVal;
+        values.W = sliderConfig.sliders.massHandle.startVal * g;
+        values.T = sliderConfig.sliders.thrustHandle.startVal;
+        values.R = sliderConfig.sliders.thrustHandle.startVal - (sliderConfig.sliders.massHandle.startVal * g);
+        values.v = 0;
+        values.a = g;
+        values.t = 0;
+        
+        // Find the slider with the name 'massHandle' and set its value
+        sliders.forEach(slider => {
+            if (slider.name === 'massHandle') {
+                slider.setValue(sliderConfig.sliders.massHandle.startVal);
+            }
+            if (slider.name === 'thrustHandle') {
+                slider.setValue(sliderConfig.sliders.thrustHandle.startVal);
+            }
+        });
+
+        contours.reset();
+        graph.reset();
+        this.updateOnTick();
+    }
+
+    manageVectorVisibility(vectorName, isVisible) {
+
+        vectorName.lineGraphics.setVisible(isVisible);
+        vectorName.arrowImage.setVisible(isVisible);
+
+        if (vectorName.annotationImage) {
+            vectorName.annotationImage.setVisible(isVisible);            
+        }
+    }
+
+    displayMessage() {
+        const messageText = messageConfig.message;
+
+        // Hide the previous message (if any) before displaying a new one
+        this.hideMessage();
+
+        // Create the text object and store it in the instance variable
+        this.message = this.scene.add.text(
+            messageConfig.x,
+            messageConfig.y,
+            messageText,
+            {
+                font: `16px Arial`, // Adjustments to the font
+                fill: messageConfig.tint,
+                align: 'center',
+                wordWrap: { width: 250, useAdvancedWrap: true },
+                lineSpacing: 4,
+                letterSpacing: 1,
+            }
+        );
+
+        this.message.setOrigin(messageConfig.originX, messageConfig.originY);
+    }
+
+    hideMessage() {
+        // Destroy the message text object if it exists
+        if (this.message) {
+            this.message.destroy();
+            this.message = null;
+        }
+    }
+
+}
+
+class Vector {
+    constructor(scene, vectorType, startX, startY, endX, endY, arrowName, labelName, alpha, arrowNudge, annotationOffset, depth) {
+
+        this.scene = scene;
+        this.type = vectorType; //takes values 'mg', 'D', 'R'
+        this.startX = startX;
+        this.startY = startY;
+        this.endX = endX;
+        this.endY = endY;
+
+        this.config = vectorsConfig;
+
+        this.lineGraphics = null;
+
+        this.arrowImageName = arrowName;
+        this.annotationImageName = labelName;
+        this.alpha = alpha;
+        this.arrowNudge = arrowNudge;
+        this.annotationOffset = annotationOffset;
+        this.depth = depth;
+    }
+
+    create() {
+        if (!this.lineGraphics) {
+            this.lineGraphics = this.scene.add.graphics();
+            this.lineGraphics.setAlpha(this.alpha);
+            this.lineGraphics.setDepth(this.depth);
+        }
+
+        this.arrowImage = this.scene.add.image(0, 0, this.arrowImageName);
+        this.arrowImage.setOrigin(this.config.arrows.originX, this.config.arrows.originY);
+        this.arrowImage.setScale(this.config.arrows.scale);
+        this.arrowImage.setAlpha(this.alpha);
+        this.arrowImage.setDepth(this.depth);
+
+
+        if (this.annotationImageName){
+            this.annotationImage = this.scene.add.image(this.config.IDText.x, this.config.IDText.y, this.annotationImageName);
+            this.annotationImage.setScale(this.config.IDText.scale);
+            this.annotationImage.setOrigin(this.config.IDText.originX, this.config.IDText.originY);
+            this.annotationImage.setAlpha(this.alpha);
+            this.annotationImage.setDepth(this.depth);
+
+        }
+
+        this.updateGraphics();
+    }
+
+    updateGraphics() {
+        // Update the line graphics
+
+        this.lineGraphics.clear();
+        this.lineGraphics.lineStyle(this.config[this.type].lineThickness, this.config[this.type].lineTint);
+        this.lineGraphics.beginPath();
+        this.lineGraphics.moveTo(this.startX, this.startY);
+        this.lineGraphics.lineTo(this.endX, this.endY);
+        this.lineGraphics.strokePath();
+        this.lineGraphics.setAlpha(this.alpha);
+
+        // Update the arrow position
+        const angle = Phaser.Math.Angle.Between(this.startX, this.startY, this.endX, this.endY);
+        this.arrowImage.setPosition(this.endX, this.endY + this.arrowNudge); // Place the arrow at the end of the line
+        this.arrowImage.setRotation(angle + Phaser.Math.PI2 / 4); // Rotate to match the direction of the line
+
+        // Update the annotation position
+        if (this.annotationImage) {
+            this.annotationImage.setPosition(this.endX, this.endY + this.annotationOffset); // Position annotation just beyond the arrowhead            
+        }
+    }
+}
+
+class CustomImage {
+    constructor(scene, imageName, configRef){
+        this.scene = scene;
+        this.imageName = imageName;
+        this.configRef = configRef;
+    }
+
+    create(){
+        this.image = this.scene.add.image(this.configRef.x, this.configRef.y, this.imageName);
+        this.image.setScale(this.configRef.scale);
+        this.image.setOrigin(this.configRef.originX, this.configRef.originY);
+    }
+
+    setPosition(x, y) {
+        this.image.setPosition(x, y);
+    }
+
+    setVisible(visible) {
+        this.image.setVisible(visible);
+    }
+}
+
+class Slider {
+    constructor(scene, name) {
+        this.scene = scene;
+        this.name = name;
+        this.config = sliderConfig.sliders[name];
+        this.handleConfig = sliderConfig.handle;
+        this.handle = null;
+        this.track = null;
+    }
+
+    create() {
+        this.createTrack(); // Create track before creating handle
+        this.handle = this.scene.add.image(this.calculateInitialPosition(), this.config.y, 'handle');
+        this.handle.setOrigin(this.handleConfig.originX, this.handleConfig.originY);
+        this.handle.setScale(this.handleConfig.scale);
+        this.handle.setInteractive({ useHandCursor: true });
+        this.addDragBehavior();
+        this.updateTrack(); // Initial track update
+    }
+
+    createTrack() {
+        const { slideLeftX, slideRightX, y } = this.handleConfig;
+        this.track = this.scene.add.graphics();
+        this.track.lineStyle(sliderConfig.track.lineThickness, sliderConfig.track.lineTint);
+        this.updateTrack(); // Ensure track is initially updated
+    }
+
+    destroyTrack() {
+        if (this.track) {
+            this.track.destroy();
+            this.track = null;
+        }
+    }
+
+    updateTrack() {
+        if (this.handle && this.track) {
+            const { slideLeftX, slideRightX } = this.handleConfig;
+            const handleX = this.handle.x;
+            const { y } = this.config;
+            const zeroX = this.convertValueToPosition(0);
+            const clampedZeroX = Phaser.Math.Clamp(zeroX, slideLeftX, slideRightX);
+            this.track.clear();
+            this.track.lineStyle(sliderConfig.track.lineThickness, sliderConfig.track.lineTint);
+            this.track.beginPath();
+            this.track.moveTo(clampedZeroX, y);
+            this.track.lineTo(handleX, y);
+            this.track.strokePath();
+        }
+    }
+
+    calculateInitialPosition(startValue = this.config.startVal) {
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const { minVal, maxVal } = this.config;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (startValue - minVal) / range;
+        return slideLeftX + valueRatio * sliderRange;
+    }
+
+    addDragBehavior() {
+        this.scene.input.setDraggable(this.handle);
+        this.handle.on('drag', (pointer, dragX) => {
+
+            dragX = Phaser.Math.Clamp(dragX, this.handleConfig.slideLeftX, this.handleConfig.slideRightX);
+
+            this.handle.x = dragX;
+            this.updateTrack();
+
+            const newValue = this.calculateValue();
+            
+            // Use the mapping to correctly update the values object
+            const mappedKey = valueKeysMapping[this.name];
+            values[mappedKey] = newValue;
+
+            visualization.updateOnSliderDrag(mappedKey);
+        });
+    }
+
+    calculateValue() {
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const { minVal, maxVal } = this.config;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (this.handle.x - slideLeftX) / sliderRange;
+        return minVal + valueRatio * range;
+    }
+
+    convertValueToPosition(value) {
+        const { minVal, maxVal } = this.config;
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (value - minVal) / range;
+        return slideLeftX + valueRatio * sliderRange;
+    }
+
+    // New Method: Set the slider to a specific value
+    setValue(value) {
+        // Convert the value to a position on the slider track
+        const position = this.convertValueToPosition(value);
+        // Update the handle's x position to match the value
+        this.handle.x = Phaser.Math.Clamp(position, this.handleConfig.slideLeftX, this.handleConfig.slideRightX);
+        // Update the track to match the new handle position
+        this.updateTrack();
+    }
+}
+
+class UI {
+    constructor(scene) {
+        this.scene = scene;
+        this.config = uiConfig;
+        this.playPauseButton = null; // To store the play/pause button
+        this.resetButton = null;     // To store the reset button
+    }
+
+    create() {
+        // Create play/pause and reset buttons
+        this.createPlayPauseButton();
+        this.createResetButton();
+    }
+
+    createPlayPauseButton() {
+        // Initially create the play button
+        this.playPauseButton = this.scene.add.image(this.config.playControls.playPause.x, this.config.playControls.playPause.y, 'playBtn-img');
+        this.playPauseButton.setOrigin(this.config.playControls.playPause.originX, this.config.playControls.playPause.originY);
+        this.playPauseButton.setInteractive({ useHandCursor: true });
+        this.playPauseButton.setDepth(this.config.playControls.depth);
+
+        this.playPauseButton.on('pointerdown', () => {
+            if (playStatus === 'paused') {
+                this.play();  // Switch to play
+                playStatus = 'playing';
+                started = true;
+            } else {
+                this.pause();  // Switch to pause
+                playStatus = 'paused';
+            }
+        });
+    }
+
+    play() {
+        playStatus = 'playing';
+        this.updatePlayPauseButton();  // Update the button to show the pause image
+        // Add code here to start/resume the simulation if needed
+    }
+
+    pause() {
+        playStatus = 'paused';
+        this.updatePlayPauseButton();  // Update the button to show the play image
+        // Add code here to pause the simulation if needed
+    }
+
+    updatePlayPauseButton() {
+        // Change the button image based on the current play status
+        if (playStatus === 'playing') {
+            this.playPauseButton.setTexture('pauseBtn-img');
+        } else {
+            this.playPauseButton.setTexture('playBtn-img');
+        }
+    }
+
+    createResetButton() {
+        // Create the reset button below the play/pause button
+        this.resetButton = this.scene.add.image(this.config.playControls.reset.x, this.config.playControls.reset.y, 'resetBtn-img');
+        this.resetButton.setOrigin(this.config.playControls.reset.originX, this.config.playControls.reset.originY);
+        this.resetButton.setInteractive({ useHandCursor: true });
+        this.resetButton.setDepth(this.config.playControls.depth);
+
+        this.resetButton.on('pointerdown', () => {
+            this.resetSimulation();  // Trigger the reset action
+        });
+    }
+
+    resetSimulation() {
+        playStatus = 'paused';
+        this.updatePlayPauseButton();  // Ensure the play/pause button shows the play image
+
+        // Add reset logic here
+        visualization.resetSimulation();
+        //console.log("Simulation reset.");  // Placeholder action
+    }
+}
+
+function preload() {
+    // Load backgrounds
+    this.load.image('tminusMgEqualsma-bg', 'tminusMgEqualsma_bg.PNG'); // upper case png is important for infinityfree
+
+    // Load slider handle images
+    this.load.image('handle', 'handle.png');
+
+    // Load rocket images
+    this.load.image('rocket-img', 'rocket_img.png');
+
+
+    // Load ui images
+    this.load.image('playBtn-img', 'playBtn_img.png');
+    this.load.image('pauseBtn-img', 'pauseBtn_img.png');
+    this.load.image('resetBtn-img', 'resetBtn_img.png');
+
+    // Load vector arrowheads
+    this.load.image('vectorArrowOrange-img', 'vectorArrowOrange_img.png');    
+    this.load.image('vectorArrowRed-img', 'vectorArrowRed_img.png');
+
+    // Load vector labels
+    this.load.image('mgText-img', 'mgText_img.png');
+    this.load.image('Ttext-img', 'Ttext_img.png');
+
+    // Load sliders
+    let sliderNames = Object.keys(sliderConfig.sliders);
+    sliderNames.forEach(name => {
+        let slider = new Slider(this, name);
+        sliders.push(slider);
+    });
+}
+
+function create() {
+
+    // Create backgrounds
+    background = new CustomImage(this, 'tminusMgEqualsma-bg', bgConfig);
+    background.create();
+
+    //let testObject = new Test(this, 100, 100); // Starting position (100, 100)
+    //testObject.create();
+
+    // Create Calculation class instance
+    calculation = new Calculation(this);
+
+    // Create sliders
+    sliders.forEach(slider => slider.create());
+
+    visualization = new Visualization(this);
+    visualization.create();
+
+    ui = new UI(this);
+    ui.create();
+
+    contours = new Contours(this);
+    contours.create();
+
+    graph = new Graph(this);
+    graph.create();
+}
+
+function update() {
+
+    if (visualization && playStatus === 'playing' && started) {
+        visualization.updateOnTick();
+    }
+}
+</script>
