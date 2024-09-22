@@ -1,0 +1,268 @@
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.15.1/dist/phaser-arcade-physics.min.js"></script>
+<script>
+
+var config = {
+    width: 1200,
+    height: 500,
+    type: Phaser.AUTO,
+    scene: {
+        preload: preload,
+        create: create,
+        update: update
+    },
+    backgroundColor: '#000000',
+    pixelArt: false // Enable texture smoothing
+};
+
+var graphConfig = {
+    topLeftX: 752,
+    topLeftY: 35,
+    bottomRightX: 1114,
+    bottomRightY: 464,
+    lineTint: '0xFFA218',
+    lineThickness: 4,
+};
+
+var bgConfig = {
+    scale: 1,
+    x: 0,
+    y: 0,
+    originX: 0,
+    originY: 0
+};
+
+var sliderConfig = {
+    handle: {
+        scale: 0.25,
+        originX: 0.5,
+        originY: 0.5,
+        slideLeftX: 65,
+        slideRightX: 344
+    },
+    sliders: {
+        magnitudeHandle: { //arbitrary units to match graph scale
+            y: 300,
+            minVal: 0,
+            maxVal: 3,
+            startVal: 3
+        },
+        directionHandle: { //in degrees
+            y: 373,
+            minVal: -90,
+            maxVal: 90,
+            startVal: 90
+        }
+    },
+    track: {
+        lineThickness: 4,
+        lineTint: '0xFFA218'
+    }
+};
+
+var values = {
+    FA: {
+        magnitude: 3,
+        direction: 0
+    },
+    FB: {
+        magnitude: 3,
+        direction: 0
+    },
+    FR: {
+        magnitude: 0,
+        direction: 0
+    }
+};
+
+var game = new Phaser.Game(config);
+var sliders = [];
+
+var background;
+var visualization;
+var calculationManager;
+
+class CustomImage {
+    constructor(scene, imageName, configRef){
+        this.scene = scene;
+        this.imageName = imageName;
+        this.configRef = configRef;
+    }
+
+    create(){
+        this.image = this.scene.add.image(this.configRef.x, this.configRef.y, this.imageName);
+        this.image.setScale(this.configRef.scale);
+        this.image.setOrigin(this.configRef.originX, this.configRef.originY);
+    }
+
+    setPosition(x, y) {
+        this.image.setPosition(x, y);
+    }
+
+    setVisible(visible) {
+        this.image.setVisible(visible);
+    }
+}
+
+class CalculationManager {
+    constructor(sliderConfig) {
+        this.sliderConfig = sliderConfig;
+    }
+
+}
+
+class Slider {
+    constructor(scene, name) {
+        this.scene = scene;
+        this.name = name;
+        this.config = sliderConfig.sliders[name];
+        this.handleConfig = sliderConfig.handle;
+        this.handle = null;
+        this.track = null;
+    }
+
+    create() {
+        this.createTrack(); // Create track before creating handle
+        this.handle = this.scene.add.image(this.calculateInitialPosition(), this.config.y, this.status === 'output' ? 'handleInactive' : 'handle');
+        this.handle.setOrigin(this.handleConfig.originX, this.handleConfig.originY);
+        this.handle.setScale(this.handleConfig.scale);
+        this.handle.setInteractive({ useHandCursor: true });
+        this.addDragBehavior();
+        this.updateTrack(); // Initial track update
+    }
+
+    createTrack() {
+        const { slideLeftX, slideRightX, y } = this.handleConfig;
+        this.track = this.scene.add.graphics();
+        this.track.lineStyle(sliderConfig.track.lineThickness, sliderConfig.track.lineTint);
+        this.updateTrack(); // Ensure track is initially updated
+    }
+
+    destroyTrack() {
+        if (this.track) {
+            this.track.destroy();
+            this.track = null;
+        }
+    }
+
+    updateTrack() {
+        if (this.handle && this.track) {
+            const { slideLeftX, slideRightX } = this.handleConfig;
+            const handleX = this.handle.x;
+            const { y } = this.config;
+            const zeroX = this.convertValueToPosition(0);
+            const clampedZeroX = Phaser.Math.Clamp(zeroX, slideLeftX, slideRightX);
+            this.track.clear();
+            this.track.lineStyle(sliderConfig.track.lineThickness, sliderConfig.track.lineTint);
+            this.track.beginPath();
+            this.track.moveTo(clampedZeroX, y);
+            this.track.lineTo(handleX, y);
+            this.track.strokePath();
+        }
+    }
+
+    calculateInitialPosition(startValue = this.config.startVal) {
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const { minVal, maxVal } = this.config;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (startValue - minVal) / range;
+        return slideLeftX + valueRatio * sliderRange;
+    }
+
+    addDragBehavior() {
+        this.scene.input.setDraggable(this.handle);
+        this.handle.on('drag', (pointer, dragX) => {
+            this.handle.x = Phaser.Math.Clamp(dragX, this.handleConfig.slideLeftX, this.handleConfig.slideRightX);
+            this.updateValues();
+            this.updateTrack();
+        });
+    }
+
+    calculateValue() {
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const { minVal, maxVal } = this.config;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (this.handle.x - slideLeftX) / sliderRange;
+        return minVal + valueRatio * range;
+    }
+
+    updateValues() {
+        
+    }
+
+    convertValueToPosition(value) {
+        const { minVal, maxVal } = this.config;
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (value - minVal) / range;
+        return slideLeftX + valueRatio * sliderRange;
+    }
+}
+
+class Visualization {
+    constructor(scene) {
+        this.scene = scene;
+    }
+
+    create(){
+
+    }
+}
+
+function preload() {
+    // Load backgrounds
+    this.load.image('addingVectors-bg', 'addingVectors_bg.png');
+
+    // Load slider handle image
+    this.load.image('handle', 'handle.png');
+
+    // Load arrows that go in the middle of vector lines
+    this.load.image('vectorArrowWhite-img', 'vectorArrowWhite_img.png'); //Force A - stays constant
+    this.load.image('vectorArrowOrange-img', 'vectorArrowOrange_img.png'); //Force B - that's changed by sliders
+    this.load.image('vectorArrowYellow-img', 'vectorArrowYellow_img.png'); //Force R - the resultant of A and B
+
+    // Load text that identifies each vector with appropriate subscript
+    this.load.image('FAText-img', 'FAText_img.png');
+    this.load.image('FBText-img', 'FBText_img.png');
+    this.load.image('FRText-img', 'FRText_img.png');
+
+    // Load white circle, which is the body on which the forces act
+    this.load.image('bodyForForces-img', 'bodyForForces_img.png'); 
+
+    // Load sliders
+    let sliderNames = Object.keys(sliderConfig.sliders);
+    sliderNames.forEach(name => {
+        let slider = new Slider(this, name);
+        sliders.push(slider);
+    });
+}
+
+function create() {
+    // Create UI instance and hit areas
+
+    calculationManager = new CalculationManager(sliderConfig);
+
+    // Create backgrounds
+    background = new CustomImage(this, 'addingVectors-bg', bgConfig);
+    background.create();
+
+    // Create sliders
+    sliders.forEach(slider => slider.create());
+
+    //create the visualization
+    visualization = new Visualization(this);
+    visualization.create();
+}
+
+function update() {
+    // Update graph during slider dragging
+    sliders.forEach(slider => {
+        slider.handle.on('drag', () => {
+            slider.updateValues();
+            //graph.plotGraph();
+        });
+    });
+}
+</script>
