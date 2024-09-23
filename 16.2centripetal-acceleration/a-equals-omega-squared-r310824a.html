@@ -1,0 +1,1240 @@
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.15.1/dist/phaser-arcade-physics.min.js"></script>
+<script>
+
+var config = {
+    width: 1200,
+    height: 500,
+    type: Phaser.AUTO,
+    scene: {
+        preload: preload,
+        create: create,
+        update: update
+    },
+    backgroundColor: '#FFFFFF',
+    pixelArt: false // Enable texture smoothing
+};
+
+var bgConfig = {
+    scale: 1,
+    x: 0,
+    y: 0,
+    originX: 0,
+    originY: 0
+};
+
+const pi = 3.142;
+
+var sliderConfig = {
+    handle: {
+        scale: 0.25,
+        originX: 0.5,
+        originY: 0.5,
+        slideLeftX: 74,
+        slideRightX: 432
+    },
+    sliders: {
+        angularVelocityHandle: { // radians/s
+            y: 362,
+            minVal: 0,
+            maxVal: pi / 2,
+            startVal: pi / 3
+        },
+        radiusHandle: { // seconds
+            y: 444,
+            minVal: 0, // display
+            maxVal: 4,
+            startVal: 2,
+            minStopper: 1 // minimum allowed value before slider stops out on slide
+        }     
+    },
+    track: {
+        lineThickness: 4,
+        lineTint: '0xFFA218' //orange
+    }
+};
+
+let vectorsConfig = {
+    lineThickness: 4,
+    lengthScale: 40,
+    arrows: { //images
+        scale: 1,
+        originX: 0.5,
+        originY: 0.2
+    },
+    IDText: { //images
+        x: 1000,
+        y: 300,
+        scale: 1,
+        originX: 0.5,
+        originY: 0.5,
+        distance: 30 //from vector line       
+    },
+    v: {
+        lineTint: '0xFFFFFF', //white
+        arrow: 'vectorArrowWhite-img',
+        label: 'vText-img' 
+    },
+    v1: {
+        lineTint: '0xFFFFFF', //white
+        arrow: 'vectorArrowWhite-img',
+        label: 'v1Text-img' 
+    },
+    v2: {
+        lineTint: '0xFFFFFF', //white
+        arrow: 'vectorArrowWhite-img',
+        label: 'v2Text-img' 
+    },
+    v1Dim: {
+        lineTint: '0x983A7F', //dark purple
+        arrow: 'vectorArrowPurple-img',
+        label: 'v1DimText-img' 
+    },
+    v2Dim: {
+        lineTint: '0x983A7F', //dark purple
+        arrow: 'vectorArrowPurple-img',
+        label: 'v2DimText-img' 
+    },
+    a: {
+        lineTint: '0xFFA218', //orange
+        arrow: 'vectorDoubleArrowOrange-img',
+        label: 'aText-img',
+        lengthScale: 0.027
+    },
+    resultant: {
+        lineTint: '0xFFA218', //orange
+        arrow: 'vectorArrowOrange-img',
+        label: 'deltaVText-img'
+    }
+};
+
+let circleConfig = {
+    topLeftX: 690,
+    topLeftY: 43,
+    bottomRightX: 1097,
+    bottomRightY: 450,
+    velocityScale: 0.016 * 1.038, // 30 fps then scaled so that the observed period of rotation matches the radius and tangential velocity
+    radius: 4, // This is in units specified in the background graphics
+    updatesInOneSecond: 60,
+    circumference: {
+        lineTint: '0xFFFFFF',
+        lineThickness: 2
+    },
+    sector: {
+        fillTint: '0xFFA218',
+        fillAlph: 0.5
+    }
+};
+
+let radioButtonGroups = { // labels for radio buttons are in background image so ref value to make debugging easier
+    scale: 1,
+    x: 645,
+    originX: 0.5,
+    originY: 0.5,
+    verticalSpacing: 36,
+    group1: {
+        name: 'visualizationChoice',
+        startY: 54,
+        selected: 'button1',
+        button1: {
+            ref: 'moving'
+        },
+        button2: {
+            ref: '1-second'
+        },
+        button3: {
+            ref: 'vector-triangle'
+        }        
+    }
+};
+
+let values = {
+    tangentialVelocity: sliderConfig.sliders.angularVelocityHandle.startVal * sliderConfig.sliders.radiusHandle.startVal,
+    radius: sliderConfig.sliders.radiusHandle.startVal,
+    radiusInPixels: null,
+    angularVelocity: sliderConfig.sliders.angularVelocityHandle.startVal
+};
+
+const valueKeysMapping = {
+    'tangentialVelocityHandle': 'tangentialVelocity',
+    'radiusHandle': 'radius',
+    'angularVelocityHandle': 'angularVelocity'
+};
+
+const info = { // global object to hold useful values that can be available everywhere
+    circle: {
+        centerX: null,
+        centerY: null
+    },
+    bob: {
+        x: null,
+        y: null,
+        angleRad: 0
+    },
+    bob1: {
+        x: null,
+        y: null
+    },
+    bob2: {
+        x: null,
+        y: null
+    },
+    bob1Vector: {
+        endX: null,
+        endY: null
+    },
+    bob2Vector: {
+        endX: null,
+        endY: null
+    },
+    vVector: {
+        lengthInPixels: null
+    },
+    aVector: {
+        lengthInPixels: null
+    },
+    genericAVector: {
+        startX: null,
+        startY: null,
+        endX: null,
+        endY: null
+    }
+}
+
+let game = new Phaser.Game(config);
+let sliders = [];
+
+let background;
+let circle;
+
+let visualization;
+let calculation;
+
+class Sector {
+    constructor(scene) {
+        this.scene = scene;
+        this.graphics = null;
+        this.sweepGraphics = null;
+        this.bob1 = null;
+        this.bob2 = null;
+
+        // Sector tracking
+        this.sweepStartAngleDeg = 0; // Start angle in degrees
+        this.sweepAngleDeg = 0;
+        this.sweepEndAngleDeg = this.sweepStartAngleDeg + Phaser.Math.RadToDeg(values.angularVelocity);
+    }
+
+    create() {
+        // Initialize the graphics object if it doesn't exist
+        if (!this.graphics) {
+            this.graphics = this.scene.add.graphics();
+        }
+
+        if (!this.sweepGraphics){
+            this.sweepGraphics = this.scene.add.graphics();            
+        }
+
+        // Create the bobs if they don't exist
+        if (!this.bob1) {
+            this.bob1 = this.scene.add.image(0, 0, 'bob-img');
+            this.bob1.setScale(1);
+            this.bob1.setOrigin(0.5, 0.5);
+        }
+
+        if (!this.bob2) {
+            this.bob2 = this.scene.add.image(0, 0, 'bob-img');
+            this.bob2.setScale(1);
+            this.bob2.setOrigin(0.5, 0.5);
+        }
+
+        // Dim bobs used in the vector triangle visualization
+        if (!this.bobDim1) {
+            this.bobDim1 = this.scene.add.image(0, 0, 'bobDim-img');
+            this.bobDim1.setScale(1);
+            this.bobDim1.setOrigin(0.5, 0.5);
+        }
+
+        if (!this.bobDim2) {
+            this.bobDim2 = this.scene.add.image(0, 0, 'bobDim-img');
+            this.bobDim2.setScale(1);
+            this.bobDim2.setOrigin(0.5, 0.5);
+        }
+
+        // Initial drawing of the sector and positioning of the bobs
+        this.update();
+    }
+
+    handleSweepUpdate() {
+        // Track whether the arc is bigger than the angle swept in 1 second and handle drawing of the arc and sector
+        this.sweepEndAngleDeg = this.sweepStartAngleDeg + Phaser.Math.RadToDeg(values.angularVelocity);
+        this.sweepAngleDeg = Phaser.Math.RadToDeg(info.bob.angleRad);
+
+        if (this.sweepAngleDeg >= this.sweepEndAngleDeg) {
+            this.sweepAngleDeg = this.sweepEndAngleDeg; // Start angle in degrees
+            this.sweepSector(); // Draw sector
+
+            this.sweepStartAngleDeg = this.sweepEndAngleDeg;
+        } else {
+            this.sweepSector(); // Draw sector
+        }
+    }
+
+    sweepSector() {
+        // Clear previous drawings
+        this.sweepGraphics.clear();
+
+        // Convert angles from degrees to radians
+        let startAngleRad = Phaser.Math.DegToRad(this.sweepStartAngleDeg); // Start angle in radians
+        let endAngleRad = Phaser.Math.DegToRad(this.sweepAngleDeg); // End angle in radians
+
+        const centerX = info.circle.centerX;
+        const centerY = info.circle.centerY;
+        const radius = values.radiusInPixels;
+
+        this.sweepGraphics.beginPath();
+        this.sweepGraphics.moveTo(centerX, centerY);
+        this.sweepGraphics.arc(
+            centerX,
+            centerY,
+            radius,
+            startAngleRad,
+            endAngleRad,
+            false
+        );
+        this.sweepGraphics.lineTo(centerX, centerY);
+        this.sweepGraphics.closePath(); // Close the path to fill the sector
+        this.sweepGraphics.fillStyle(circleConfig.sector.fillTint, circleConfig.sector.fillAlph);
+        this.sweepGraphics.fillPath(); // Fill the sector
+    }
+
+    update() {
+        // Clear any previous drawing
+        this.graphics.clear();
+
+        // Set the style for the sector
+        this.graphics.fillStyle(circleConfig.sector.fillTint, circleConfig.sector.fillAlph);
+
+        // Calculate the angle in radians
+        const startAngle = -Math.PI / 2; // 12 o'clock position
+        const endAngle = startAngle + values.angularVelocity;
+
+        // Draw the sector
+        this.graphics.beginPath();
+        this.graphics.moveTo(info.circle.centerX, info.circle.centerY);
+        this.graphics.arc(info.circle.centerX, info.circle.centerY, values.radiusInPixels, startAngle, endAngle, false);
+        this.graphics.closePath();
+        this.graphics.fillPath();
+
+        const bob1X = info.circle.centerX + values.radiusInPixels * Math.cos(startAngle);
+        const bob1Y = info.circle.centerY + values.radiusInPixels * Math.sin(startAngle);
+
+        const bob2X = info.circle.centerX + values.radiusInPixels * Math.cos(endAngle);
+        const bob2Y = info.circle.centerY + values.radiusInPixels * Math.sin(endAngle);
+
+        // Position the first bob at the start of the arc
+        this.bob1.setPosition(bob1X, bob1Y);
+        this.bobDim1.setPosition(bob1X, bob1Y);
+
+        // Position the second bob at the end of the arc
+        this.bob2.setPosition(bob2X, bob2Y);
+        this.bobDim2.setPosition(bob2X, bob2Y);
+
+        // Store the current positions in the info object
+        info.bob1.x = bob1X;
+        info.bob1.y = bob1Y;
+
+        info.bob2.x = bob2X;
+        info.bob2.y = bob2Y;
+    }
+}
+
+class Calculation {   
+    constructor(scene) {
+        this.scene = scene; //just used for scratch drawing
+    }
+
+    calculateInitialValues() {
+        // circle properties
+        info.circle.centerX = circleConfig.topLeftX + ((circleConfig.bottomRightX - circleConfig.topLeftX) / 2);
+        info.circle.centerY = circleConfig.topLeftY + ((circleConfig.bottomRightY - circleConfig.topLeftY) / 2);        
+    }
+
+    calculateGenericAccelerationVector() {
+        // store start and end coordinates in the info object that can be translated to where it's needed
+        // Step 1: Start with v1 at its actual position on bob1
+        const v1StartX = info.bob1.x;
+        const v1StartY = info.bob1.y;
+        const v1EndX = info.bob1Vector.endX;
+        const v1EndY = info.bob1Vector.endY;
+
+        // Step 2: Calculate v2 where it starts at bob2
+        const v2InitialStartX = info.bob2.x;
+        const v2InitialStartY = info.bob2.y;
+        const v2InitialEndX = info.bob2Vector.endX;
+        const v2InitialEndY = info.bob2Vector.endY;
+
+        // Step 3: Translate v2 so that it starts at the start of v1
+        const v2TranslatedStartX = v1StartX;
+        const v2TranslatedStartY = v1StartY;
+        const v2TranslatedEndX = v2TranslatedStartX + (v2InitialEndX - v2InitialStartX);
+        const v2TranslatedEndY = v2TranslatedStartY + (v2InitialEndY - v2InitialStartY);
+
+        // Step 4: Calculate the Δv vector from the end of v1 to the end of translated v2
+        const deltaVStartX = v1EndX;
+        const deltaVStartY = v1EndY;
+        const deltaVEndX = v2TranslatedEndX;
+        const deltaVEndY = v2TranslatedEndY;
+
+        // Store the calculated Δv vector coordinates in the info object
+        info.genericAVector.startX = deltaVStartX;
+        info.genericAVector.startY = deltaVStartY;
+        info.genericAVector.endX = deltaVEndX;
+        info.genericAVector.endY = deltaVEndY;
+    }
+
+    calculateVectorTriangle() {
+        // Step 1: Start with v1 at its actual position on bob1
+        const v1StartX = info.bob1.x;
+        const v1StartY = info.bob1.y;
+        const v1EndX = info.bob1Vector.endX;
+        const v1EndY = info.bob1Vector.endY;
+
+        // Step 2: Calculate v2 where it starts at bob2
+        const v2InitialStartX = info.bob2.x;
+        const v2InitialStartY = info.bob2.y;
+        const v2InitialEndX = info.bob2Vector.endX;
+        const v2InitialEndY = info.bob2Vector.endY;
+
+        // Step 3: Translate v2 so that it starts at the start of v1
+        const v2TranslatedStartX = v1StartX;
+        const v2TranslatedStartY = v1StartY;
+        const v2TranslatedEndX = v2TranslatedStartX + (v2InitialEndX - v2InitialStartX);
+        const v2TranslatedEndY = v2TranslatedStartY + (v2InitialEndY - v2InitialStartY);
+
+        // Step 4: Use the generic acceleration vector (Δv) from the info object
+        const deltaVStartX = info.genericAVector.startX;
+        const deltaVStartY = info.genericAVector.startY;
+        const deltaVEndX = info.genericAVector.endX;
+        const deltaVEndY = info.genericAVector.endY;
+
+        // Step 5: Calculate the angular midpoint of the arc
+        const angleBob1 = Math.atan2(info.bob1.y - info.circle.centerY, info.bob1.x - info.circle.centerX);
+        const angleBob2 = Math.atan2(info.bob2.y - info.circle.centerY, info.bob2.x - info.circle.centerX);
+        const angleMidpoint = (angleBob1 + angleBob2) / 2;
+
+        // Step 6: Calculate the coordinates of the midpoint on the arc
+        const arcMidpointX = info.circle.centerX + values.radiusInPixels * Math.cos(angleMidpoint);
+        const arcMidpointY = info.circle.centerY + values.radiusInPixels * Math.sin(angleMidpoint);
+
+        // Step 7: Calculate the translation vector
+        const translationX = arcMidpointX - deltaVStartX;
+        const translationY = arcMidpointY - deltaVStartY;
+
+        // Step 8: Apply the translation to all points
+        const v1TranslatedStartX = v1StartX + translationX;
+        const v1TranslatedStartY = v1StartY + translationY;
+        const v1TranslatedEndX = v1EndX + translationX;
+        const v1TranslatedEndY = v1EndY + translationY;
+
+        const v2TranslatedStartXFinal = v2TranslatedStartX + translationX;
+        const v2TranslatedStartYFinal = v2TranslatedStartY + translationY;
+        const v2TranslatedEndXFinal = v2TranslatedEndX + translationX;
+        const v2TranslatedEndYFinal = v2TranslatedEndY + translationY;
+
+        const deltaVTranslatedStartX = deltaVStartX + translationX;
+        const deltaVTranslatedStartY = deltaVStartY + translationY;
+        const deltaVTranslatedEndX = deltaVEndX + translationX;
+        const deltaVTranslatedEndY = deltaVEndY + translationY;
+
+        // Return the translated coordinates as an object
+        return {
+            v1Start: { x: v1TranslatedStartX, y: v1TranslatedStartY },
+            v1End: { x: v1TranslatedEndX, y: v1TranslatedEndY },
+            v2Start: { x: v2TranslatedStartXFinal, y: v2TranslatedStartYFinal },
+            v2End: { x: v2TranslatedEndXFinal, y: v2TranslatedEndYFinal },
+            deltaVStart: { x: deltaVTranslatedStartX, y: deltaVTranslatedStartY },
+            deltaVEnd: { x: deltaVTranslatedEndX, y: deltaVTranslatedEndY }
+        };
+    }
+
+
+    calculateBobVelocityVector(options = {}) {
+
+        const { location = 'moving bob' } = options;
+
+        if (location === 'moving bob') {
+            const dx = info.bob.x - info.circle.centerX;
+            const dy = info.bob.y - info.circle.centerY;
+
+            // Normalize the direction vector (get unit vector)
+            const length = Math.sqrt(dx * dx + dy * dy);
+            const unitDx = dx / length;
+            const unitDy = dy / length;
+
+            // Rotate the direction vector 90 degrees clockwise to get the correct velocity direction
+            const velocityDx = -unitDy;   // 90 degree rotation clockwise: (x, y) -> (-y, x)
+            const velocityDy = unitDx;
+
+            // Calculate the end point of the velocity vector
+            const vectorLength = values.tangentialVelocity * vectorsConfig.lengthScale;
+            const endX = info.bob.x + velocityDx * vectorLength;
+            const endY = info.bob.y + velocityDy * vectorLength;
+
+            info.vVector.lengthInPixels = vectorLength // store the length so the acceleration vector scales correctly
+
+            // Return the start and end coordinates
+            return {
+                startX: info.bob.x,
+                startY: info.bob.y,
+                endX: endX,
+                endY: endY
+            };
+
+        } else if (location === 'bob1') {
+
+            const dx = info.bob1.x - info.circle.centerX;
+            const dy = info.bob1.y - info.circle.centerY;
+
+            // Normalize the direction vector (get unit vector)
+            const length = Math.sqrt(dx * dx + dy * dy);
+            const unitDx = dx / length;
+            const unitDy = dy / length;
+
+            // Rotate the direction vector 90 degrees clockwise to get the correct velocity direction
+            const velocityDx = -unitDy;   // 90 degree rotation clockwise: (x, y) -> (-y, x)
+            const velocityDy = unitDx;
+
+            // Calculate the end point of the velocity vector
+            const vectorLength = values.tangentialVelocity * vectorsConfig.lengthScale;
+            const endX = info.bob1.x + velocityDx * vectorLength;
+            const endY = info.bob1.y + velocityDy * vectorLength;
+
+            info.vVector.lengthInPixels = vectorLength // store the length so the acceleration vector scales correctly
+
+            // Return the start and end coordinates
+            return {
+                startX: info.bob1.x,
+                startY: info.bob1.y,
+                endX: endX,
+                endY: endY
+            };            
+        } else if (location === 'bob2') {
+            const dx = info.bob2.x - info.circle.centerX;
+            const dy = info.bob2.y - info.circle.centerY;
+
+            // Normalize the direction vector (get unit vector)
+            const length = Math.sqrt(dx * dx + dy * dy);
+            const unitDx = dx / length;
+            const unitDy = dy / length;
+
+            // Rotate the direction vector 90 degrees clockwise to get the correct velocity direction
+            const velocityDx = -unitDy;   // 90 degree rotation clockwise: (x, y) -> (-y, x)
+            const velocityDy = unitDx;
+
+            // Calculate the end point of the velocity vector
+            const vectorLength = values.tangentialVelocity * vectorsConfig.lengthScale;
+            const endX = info.bob2.x + velocityDx * vectorLength;
+            const endY = info.bob2.y + velocityDy * vectorLength;
+
+            info.vVector.lengthInPixels = vectorLength // store the length so the acceleration vector scales correctly
+
+            // Return the start and end coordinates
+            return {
+                startX: info.bob2.x,
+                startY: info.bob2.y,
+                endX: endX,
+                endY: endY
+            };            
+        }
+    }
+
+    calculateAccelerationVector(options = {}) {
+        const { location = 'moving bob' } = options;
+
+        if (location === 'moving bob') {
+            // Calculate the direction of the acceleration vector from the moving bob to the center of the circle
+            const dx = info.bob.x - info.circle.centerX;
+            const dy = info.bob.y - info.circle.centerY;
+
+            // Normalize the direction vector (get unit vector)
+            const length = Math.sqrt(dx * dx + dy * dy);
+            const unitDx = dx / length;
+            const unitDy = dy / length;
+
+            // Use the magnitude from the generic acceleration vector calculated from the vector triangle
+            const genericLength = Math.sqrt(
+                Math.pow(info.genericAVector.endX - info.genericAVector.startX, 2) +
+                Math.pow(info.genericAVector.endY - info.genericAVector.startY, 2)
+            );
+
+            // Invert the direction to point towards the center and apply the correct magnitude
+            const accelerationDx = -unitDx * genericLength;
+            const accelerationDy = -unitDy * genericLength;
+
+            // Calculate the end point of the acceleration vector
+            const endX = info.bob.x + accelerationDx;
+            const endY = info.bob.y + accelerationDy;
+
+            // Return the start and end coordinates
+            return {
+                startX: info.bob.x,
+                startY: info.bob.y,
+                endX: endX,
+                endY: endY
+            };
+        }
+    }
+}
+
+class Visualization {
+    constructor(scene) {
+        this.scene = scene;
+        this.currentVisualization = 'moving'; //values 'moving', '1 second', 'vector triangle'
+        this.options = {};
+
+        //vectors
+        this.vVector = null;
+        this.aVector = null;
+        this.v1Vector = null;
+        this.v2Vector = null;
+        this.triangleV1Vector = null;
+        this.triangleV2Vector = null;
+        this.triangleDeltaVVector = null;
+        this.v1DimVector = null;
+        this.v2DimVector = null;
+
+        //arc
+        this.sector = null;
+    }
+
+    create() {
+
+        // The order is to allow initializationn of values needed for subsequent methods
+        calculation.calculateInitialValues();
+
+        // ****Set up '1 second' visualization
+        this.sector = new Sector(this.scene);
+        this.sector.create();
+
+        // Set up v1 vector
+        this.options.location = "bob1"; // used to help the Calculation class methods
+        this.v1Vector = this.createVector('v1', calculation.calculateBobVelocityVector, 'v1');
+        this.v1Vector.create();
+
+        // Set up v2 vector
+        this.options.location = "bob2"; // used to help the Calculation class methods
+        this.v2Vector = this.createVector('v2', calculation.calculateBobVelocityVector, 'v2');
+        this.v2Vector.create();
+
+        // Calculate the start and end coordinates of a generic acceleration vector and store them
+        calculation.calculateGenericAccelerationVector();
+
+        // ****Set up 'vector triangle' visualization - the bobs are already set up so we just control their visibility
+        const triangle = calculation.calculateVectorTriangle();
+        this.plotTriangle(triangle);
+
+        // Set up v1Dim vector
+        this.options.location = "bob1"; // used to help the Calculation class methods
+        this.v1DimVector = this.createVector('v1Dim', calculation.calculateBobVelocityVector, 'v1Dim');
+        this.v1DimVector.create();
+
+        // Set up v2Dim vector
+        this.options.location = "bob2"; // used to help the Calculation class methods
+        this.v2DimVector = this.createVector('v2Dim', calculation.calculateBobVelocityVector, 'v2Dim');
+        this.v2DimVector.create();
+
+        // ****Set up 'moving' visualization
+        circle = new Circle(this.scene);
+        circle.create();
+        circle.updateOnTick(); // to initialise storing coords of bob position
+
+        this.options.location = "moving bob"; // used to help the Calculation class methods
+
+        // Set up velocity vector
+        this.vVector = this.createVector('v', calculation.calculateBobVelocityVector, 'v');
+        this.vVector.create();
+
+        // Set up acceleration vector
+        this.aVector = this.createVector('a', calculation.calculateAccelerationVector, 'a');
+        this.aVector.create();
+    }
+
+    changeVisualization() {
+        this.hideEverything();
+
+        const v = this.currentVisualization;
+
+        switch (v) {
+            case 'moving':
+                circle.bob.setVisible(true);
+                this.showVector(this.vVector);
+                this.showVector(this.aVector);
+                this.sector.sweepGraphics.setVisible(true);
+            break;
+
+            case '1-second':
+                this.sector.bob1.setVisible(true);
+                this.sector.bob2.setVisible(true);
+                this.sector.graphics.setVisible(true);
+                this.showVector(this.v1Vector);
+                this.showVector(this.v2Vector);
+            break;
+
+            case 'vector-triangle':
+                this.sector.bobDim1.setVisible(true);
+                this.sector.bobDim2.setVisible(true);
+                this.showVector(this.triangleV1Vector);
+                this.showVector(this.triangleV2Vector);
+                this.showVector(this.triangleDeltaVVector);
+                this.showVector(this.v1DimVector);
+                this.showVector(this.v2DimVector);
+            break;
+        }
+    }
+
+    updateOnSliderDrag() {
+        circle.updateOnSliderDrag();
+
+        this.sector.update();
+
+        this.options.location = 'bob1';
+        this.updateVector(this.v1Vector, calculation.calculateBobVelocityVector);
+
+        this.options.location = 'bob2';
+        this.updateVector(this.v2Vector, calculation.calculateBobVelocityVector);
+
+        this.options.location = 'bob1';
+        this.updateVector(this.v1DimVector, calculation.calculateBobVelocityVector);
+
+        this.options.location = 'bob2';
+        this.updateVector(this.v2DimVector, calculation.calculateBobVelocityVector);
+
+        calculation.calculateGenericAccelerationVector();
+
+        const triangle = calculation.calculateVectorTriangle();
+        this.updateTriangle(triangle);
+
+    }
+
+    updateOnTick() {
+        this.updateMovingAssets();
+    }
+
+    updateMovingAssets(){
+        circle.updateOnTick();
+        // Update velocity vector
+
+        this.options.location = 'moving bob';
+        this.updateVector(this.vVector, calculation.calculateBobVelocityVector);
+        this.updateVector(this.aVector, calculation.calculateAccelerationVector);
+
+        this.sector.handleSweepUpdate();
+    }
+
+    hideEverything() {
+        // 'moving' assets
+        circle.bob.setVisible(false);
+        this.hideVector(this.vVector);
+        this.hideVector(this.aVector);
+        this.sector.sweepGraphics.setVisible(false);
+
+        // '1-second' assets
+        this.sector.bob1.setVisible(false);
+        this.sector.bob2.setVisible(false);
+        this.sector.graphics.setVisible(false);
+        this.hideVector(this.v1Vector);
+        this.hideVector(this.v2Vector);
+
+        // 'vector-triangle' assets
+        this.hideVector(this.triangleV1Vector);
+        this.hideVector(this.triangleV2Vector);
+        this.hideVector(this.triangleDeltaVVector);
+        this.sector.bobDim1.setVisible(false);
+        this.sector.bobDim2.setVisible(false);
+        this.hideVector(this.v1DimVector);
+        this.hideVector(this.v2DimVector);
+    }
+
+    hideVector(vector) {
+        vector.lineGraphics.setVisible(false);
+        vector.arrowImage.setVisible(false);
+        vector.annotationImage.setVisible(false);
+    }
+
+    showVector(vector) {
+        vector.lineGraphics.setVisible(true);
+        vector.arrowImage.setVisible(true);
+        vector.annotationImage.setVisible(true);        
+    }
+
+    createVector(vectorType, calculationMethod, configKey) {
+
+        const { startX, startY, endX, endY } = calculationMethod(this.options);
+        const { arrow, label } = vectorsConfig[configKey];
+
+        if (this.options.location === 'bob1') {
+            info.bob1Vector.endX = endX;
+            info.bob1Vector.endY = endY;            
+        } else if (this.options.location === 'bob2') {
+            info.bob2Vector.endX = endX;
+            info.bob2Vector.endY = endY;            
+        }
+
+        return new Vector(this.scene, vectorType, startX, startY, endX, endY, arrow, label);
+    }
+
+    updateVector(vectorInstance, calculationMethod) {
+
+        const { startX, startY, endX, endY } = calculationMethod(this.options);
+
+        if (this.options.location === 'bob1') {
+            info.bob1Vector.endX = endX;
+            info.bob1Vector.endY = endY;            
+        } else if (this.options.location === 'bob2') {
+            info.bob2Vector.endX = endX;
+            info.bob2Vector.endY = endY;            
+        }
+
+        Object.assign(vectorInstance, { startX, startY, endX, endY });
+        vectorInstance.updateGraphics();
+    }
+
+    plotTriangle(triangleCoords){
+
+        const t = triangleCoords;
+
+        this.triangleV1Vector = new Vector(this.scene, 'v1', t.v1Start.x, t.v1Start.y, t.v1End.x, t.v1End.y, vectorsConfig.v1.arrow, vectorsConfig.v1.label);
+        this.triangleV1Vector.create();
+        this.triangleV2Vector = new Vector(this.scene, 'v2', t.v2Start.x, t.v2Start.y, t.v2End.x, t.v2End.y, vectorsConfig.v2.arrow, vectorsConfig.v2.label);
+        this.triangleV2Vector.create();
+        this.triangleDeltaVVector = new Vector(this.scene, 'a', t.deltaVStart.x, t.deltaVStart.y, t.deltaVEnd.x, t.deltaVEnd.y, vectorsConfig.a.arrow, vectorsConfig.a.label);
+        this.triangleDeltaVVector.create();
+    }
+
+    updateTriangle(triangleCoords) {
+
+        const t = triangleCoords;
+
+        let { v1Start: { x: startX, y: startY }, v1End: { x: endX, y: endY } } = t;
+        Object.assign(this.triangleV1Vector, { startX, startY, endX, endY });
+        this.triangleV1Vector.updateGraphics();
+
+        ({ v2Start: { x: startX, y: startY }, v2End: { x: endX, y: endY } } = t);
+        Object.assign(this.triangleV2Vector, { startX, startY, endX, endY });
+        this.triangleV2Vector.updateGraphics();
+
+        ({ deltaVStart: { x: startX, y: startY }, deltaVEnd: { x: endX, y: endY } } = t);
+        Object.assign(this.triangleDeltaVVector, { startX, startY, endX, endY });
+        this.triangleDeltaVVector.updateGraphics();
+
+    } 
+}
+
+class Circle {
+    constructor(scene) {
+        this.scene = scene;
+        this.angleDeg = 0; // Initial angle in degrees for bob
+        this.radius = values.radiusInPixels;
+        this.centerX = info.circle.centerX;
+        this.centerY = info.circle.centerY;
+        this.bob = null; // Placeholder for the bob image
+        this.circleGraphics = null; // Placeholder for the circle graphics
+    }
+
+    create() {
+
+        // Create the bob image
+        this.bob = this.scene.add.image(this.centerX, this.centerY, 'bob-img');
+
+        this.bob.setScale(1); // Adjust scale as needed
+        this.bob.setOrigin(0.5, 0.5); // Center the origin for proper rotation
+
+        // Initialize the circle, arc, and sector graphics
+        this.circleGraphics = this.scene.add.graphics();
+
+        this.drawCircumference();
+    }
+
+    updateOnSliderDrag() {
+        // Recalculate the radius in pixels when the slider is dragged
+        this.radius = values.radiusInPixels || (circleConfig.bottomRightX - circleConfig.topLeftX) / 2;
+        this.drawCircumference();
+    }
+
+    updateOnTick() {
+        // Update the angle based on the angular velocity calculated from the linear velocity from the slider (degrees per second)
+        let angularVelocityDeg = values.angularVelocity * (180 / Math.PI); // Convert radians to degrees
+
+        this.angleDeg += angularVelocityDeg * circleConfig.velocityScale;
+
+        // Calculate the bob's new position based on the updated angle (degrees) and radius
+        let angleRad = Phaser.Math.DegToRad(this.angleDeg); // Convert angle to radians for trigonometric calculations
+        let x = this.centerX + this.radius * Math.cos(angleRad);
+        let y = this.centerY + this.radius * Math.sin(angleRad);
+
+        // Store the bob's current angle in radians for use by e.g. sweep sector method
+        info.bob.angleRad = angleRad;
+
+        // Store the bob's coords for e.g. placing velocity and accln vectors
+        info.bob.x = x;
+        info.bob.y = y;
+
+        // Update the bob's position
+        this.bob.setPosition(x, y);
+    }
+
+    drawCircumference() {
+        const radiusInPixels = values.radiusInPixels;
+
+        if (radiusInPixels !== null && this.circleGraphics) {
+            this.circleGraphics.clear(); // Clear previous circumference drawings
+
+            // Set the circle's line style
+            this.circleGraphics.lineStyle(circleConfig.circumference.lineThickness, circleConfig.circumference.lineTint);
+            this.circleGraphics.strokeCircle(this.centerX, this.centerY, radiusInPixels);
+        }
+    }
+}
+
+class Vector {
+    constructor(scene, vectorType, startX, startY, endX, endY, arrowName, labelName) {
+
+        this.scene = scene;
+        this.type = vectorType; //takes values 'v', 'v1', 'v2', 'a' or 'resultant'
+        this.startX = startX;
+        this.startY = startY;
+        this.endX = endX;
+        this.endY = endY;
+
+        this.config = vectorsConfig;
+
+        this.lineGraphics = null;
+        this.arrowImage = null;
+        this.annotationImage = null;
+
+        this.arrowImageName = arrowName;
+        this.annotationImageName = labelName;
+    }
+
+    create() {
+        if (!this.lineGraphics) {
+            this.lineGraphics = this.scene.add.graphics();
+        }
+
+        this.arrowImage = this.scene.add.image(0, 0, this.arrowImageName);
+        this.arrowImage.setOrigin(this.config.arrows.originX, this.config.arrows.originY);
+        this.arrowImage.setScale(this.config.arrows.scale);
+
+        this.annotationImage = this.scene.add.image(this.config.IDText.x, this.config.IDText.y, this.annotationImageName);
+        this.annotationImage.setScale(this.config.IDText.scale);
+        this.annotationImage.setOrigin(this.config.IDText.originX, this.config.IDText.originY);
+
+        this.updateGraphics();
+    }
+
+    updateGraphics() {
+        // Update the line graphics
+        this.lineGraphics.clear();
+        this.lineGraphics.lineStyle(this.config.lineThickness, this.config[this.type].lineTint);
+        this.lineGraphics.beginPath();
+        this.lineGraphics.moveTo(this.startX, this.startY);
+        this.lineGraphics.lineTo(this.endX, this.endY);
+        this.lineGraphics.strokePath();
+
+        // Update the arrow position
+        const angle = Phaser.Math.Angle.Between(this.startX, this.startY, this.endX, this.endY);
+        this.arrowImage.setPosition(this.endX, this.endY); // Place the arrow at the end of the line
+        this.arrowImage.setRotation(angle + Phaser.Math.PI2 / 4); // Rotate to match the direction of the line
+
+        // Update the annotation position
+        const distance = this.config.IDText.distance;
+        const annotationOffsetX = distance * Math.cos(angle);
+        const annotationOffsetY = distance * Math.sin(angle);
+        this.annotationImage.setPosition(this.endX + annotationOffsetX, this.endY + annotationOffsetY); // Position annotation just beyond the arrowhead
+    }
+}
+
+class CustomImage {
+    constructor(scene, imageName, configRef){
+        this.scene = scene;
+        this.imageName = imageName;
+        this.configRef = configRef;
+    }
+
+    create(){
+        this.image = this.scene.add.image(this.configRef.x, this.configRef.y, this.imageName);
+        this.image.setScale(this.configRef.scale);
+        this.image.setOrigin(this.configRef.originX, this.configRef.originY);
+    }
+
+    setPosition(x, y) {
+        this.image.setPosition(x, y);
+    }
+
+    setVisible(visible) {
+        this.image.setVisible(visible);
+    }
+}
+
+class Slider {
+    constructor(scene, name) {
+        this.scene = scene;
+        this.name = name;
+        this.config = sliderConfig.sliders[name];
+        this.handleConfig = sliderConfig.handle;
+        this.handle = null;
+        this.track = null;
+    }
+
+    create() {
+        this.createTrack(); // Create track before creating handle
+        this.handle = this.scene.add.image(this.calculateInitialPosition(), this.config.y, 'handle');
+        this.handle.setOrigin(this.handleConfig.originX, this.handleConfig.originY);
+        this.handle.setScale(this.handleConfig.scale);
+        this.handle.setInteractive({ useHandCursor: true });
+        this.addDragBehavior();
+        this.updateTrack(); // Initial track update
+
+        if (this.name === 'radiusHandle') {
+            this.calculateRadiusInPixels(sliderConfig.sliders.radiusHandle.startVal); // Call to ensure radius is recalculated
+        }
+    }
+
+    createTrack() {
+        const { slideLeftX, slideRightX, y } = this.handleConfig;
+        this.track = this.scene.add.graphics();
+        this.track.lineStyle(sliderConfig.track.lineThickness, sliderConfig.track.lineTint);
+        this.updateTrack(); // Ensure track is initially updated
+    }
+
+    destroyTrack() {
+        if (this.track) {
+            this.track.destroy();
+            this.track = null;
+        }
+    }
+
+    updateTrack() {
+        if (this.handle && this.track) {
+            const { slideLeftX, slideRightX } = this.handleConfig;
+            const handleX = this.handle.x;
+            const { y } = this.config;
+            const zeroX = this.convertValueToPosition(0);
+            const clampedZeroX = Phaser.Math.Clamp(zeroX, slideLeftX, slideRightX);
+            this.track.clear();
+            this.track.lineStyle(sliderConfig.track.lineThickness, sliderConfig.track.lineTint);
+            this.track.beginPath();
+            this.track.moveTo(clampedZeroX, y);
+            this.track.lineTo(handleX, y);
+            this.track.strokePath();
+        }
+    }
+
+    calculateInitialPosition(startValue = this.config.startVal) {
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const { minVal, maxVal } = this.config;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (startValue - minVal) / range;
+        return slideLeftX + valueRatio * sliderRange;
+    }
+
+    addDragBehavior() {
+        this.scene.input.setDraggable(this.handle);
+        this.handle.on('drag', (pointer, dragX) => {
+            // Adjust dragX to respect the minimum value if it's a radiusHandle
+            if (this.name === 'radiusHandle') {
+                let minValue = this.config.minStopper;
+                let minX = this.convertValueToPosition(minValue);
+                dragX = Phaser.Math.Clamp(dragX, minX, this.handleConfig.slideRightX);
+            } else {
+                dragX = Phaser.Math.Clamp(dragX, this.handleConfig.slideLeftX, this.handleConfig.slideRightX);
+            }
+
+            this.handle.x = dragX;
+            this.updateTrack();
+
+            const newValue = this.calculateValue();
+            
+            // Use the mapping to correctly update the values object
+            const mappedKey = valueKeysMapping[this.name];
+            values[mappedKey] = newValue;
+
+            if (this.name === 'radiusHandle') {
+                this.calculateRadiusInPixels(newValue);
+                //this.calculateAngularVelocityForConstantTangentialVelocity();
+                this.calculateTangentialVelocityForConstantAngularVelocity();
+            }
+
+            if (this.name === 'angularVelocityHandle') {
+                this.calculateTangentialVelocity(newValue);
+            }
+
+            visualization.updateOnSliderDrag();
+        });
+    }
+
+    calculateRadiusInPixels(value){
+
+        const unitsToPixels = (circleConfig.bottomRightX - circleConfig.topLeftX) / (2 * circleConfig.radius);
+        const radiusInPixels = value * unitsToPixels;
+
+        values.radiusInPixels = radiusInPixels;
+    }
+
+    calculateTangentialVelocity(angularVelocity){
+        const tangentialVelocity = angularVelocity * values.radius;
+        values.tangentialVelocity = tangentialVelocity;
+    }
+
+    calculateTangentialVelocityForConstantAngularVelocity() {
+        // Recalculate angular velocity while keeping tangential velocity constant
+        const tangentialVelocity = values.angularVelocity * values.radius;
+        values.tangentialVelocity = tangentialVelocity;
+    }
+
+    calculateValue() {
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const { minVal, maxVal } = this.config;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (this.handle.x - slideLeftX) / sliderRange;
+        return minVal + valueRatio * range;
+    }
+
+    convertValueToPosition(value) {
+        const { minVal, maxVal } = this.config;
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (value - minVal) / range;
+        return slideLeftX + valueRatio * sliderRange;
+    }
+}
+
+class RadioButtonGroup {
+    constructor(scene, config, groupKey) {
+        this.scene = scene;
+        this.config = config;
+        this.group = config[groupKey];
+        this.buttons = {}; // Store button images for easy access during selection
+    }
+
+    create() {
+        let yPos = this.group.startY;
+
+        // Explicitly loop only through the buttons in the group
+        const buttonKeys = Object.keys(this.group).filter(key => key.startsWith('button'));
+
+        buttonKeys.forEach(buttonKey => {
+            const buttonConfig = this.group[buttonKey];
+            const isSelected = (buttonKey === this.group.selected);
+
+            // Create the button image
+            const buttonImage = this.scene.add.image(
+                this.config.x,
+                yPos,
+                isSelected ? 'radioButtonSelected-img' : 'radioButtonUnselected-img'
+            )
+            .setScale(this.config.scale)
+            .setOrigin(this.config.originX, this.config.originY)
+            .setInteractive({ cursor: 'pointer' });
+
+            // Store the button image in the buttons object
+            this.buttons[buttonKey] = buttonImage;
+
+            // Add click event listener
+            buttonImage.on('pointerdown', () => {
+                this.selectButton(buttonKey);
+            });
+
+            yPos += this.config.verticalSpacing;
+        });
+    }
+
+    selectButton(buttonKey) {
+
+        // Update the selected button
+        this.group.selected = buttonKey;
+
+        // Set all buttons to unselected state
+        for (const key in this.buttons) {
+            this.buttons[key].setTexture('radioButtonUnselected-img');
+        }
+
+        // Set the selected button to selected state
+        this.buttons[buttonKey].setTexture('radioButtonSelected-img');
+
+        visualization.currentVisualization = this.group[buttonKey].ref;
+        visualization.changeVisualization();
+    }
+}
+
+function preload() {
+    // Load backgrounds
+    this.load.image('aEqualsOmegaSquaredR-bg', 'aEqualsOmegaSquaredR_bg.PNG');
+
+    // Load slider handle images
+    this.load.image('handle', 'handle.png');
+
+    // Load the bob that moves in a circle
+    this.load.image('bob-img', 'bob_img.png');
+
+    // Load the dim bobs that are used in the vector triangle visualization
+    this.load.image('bobDim-img', 'bobDim_img.png');    
+
+    // Load vector arrows
+    this.load.image('vectorArrowWhite-img', 'vectorArrowWhite_img.png');
+    this.load.image('vectorArrowOrange-img', 'vectorArrowOrange_img.png');
+    this.load.image('vectorDoubleArrowOrange-img', 'vectorDoubleArrowOrange_img.png');
+    this.load.image('vectorArrowPurple-img', 'vectorArrowPurple_img.png');
+
+    // Load vector labels
+    this.load.image('vText-img', 'vText_img.png');
+    this.load.image('v1Text-img', 'v1Text_img.png');
+    this.load.image('v2Text-img', 'v2Text_img.png');
+    this.load.image('aText-img', 'aText_img.png');
+    this.load.image('deltaVText-img', 'deltaVText_img.png');
+    this.load.image('v1DimText-img', 'v1DimText_img.png');
+    this.load.image('v2DimText-img', 'v2DimText_img.png');
+
+    // Radio button images
+    this.load.image('radioButtonSelected-img', 'radioButtonSelected_img.png');
+    this.load.image('radioButtonUnselected-img', 'radioButtonUnselected_img.png');
+
+    // Load sliders
+    let sliderNames = Object.keys(sliderConfig.sliders);
+    sliderNames.forEach(name => {
+        let slider = new Slider(this, name);
+        sliders.push(slider);
+    });
+}
+
+function create() {
+
+    // Create backgrounds
+    background = new CustomImage(this, 'aEqualsOmegaSquaredR-bg', bgConfig);
+    background.create();
+
+    // Create Calculation class instance
+    calculation = new Calculation(this);
+
+    // Create sliders
+    sliders.forEach(slider => slider.create()); // needs to be instantiated before Visualization to init values like radiusInPixels
+
+    // Instantiate and create the first radio button group
+    const radioGroup1 = new RadioButtonGroup(this, radioButtonGroups, 'group1'); //visualizationChoice
+    radioGroup1.create();
+
+    visualization = new Visualization(this);
+    visualization.create();
+    visualization.changeVisualization(); // picks up the initial visualization state
+
+}
+
+function update() {
+
+    if (visualization) {
+        visualization.updateOnTick();
+    }
+}
+</script>
