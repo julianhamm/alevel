@@ -1,0 +1,650 @@
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.15.1/dist/phaser-arcade-physics.min.js"></script>
+<script>
+
+var config = {
+    width: 1200,
+    height: 500,
+    type: Phaser.AUTO,
+    scene: {
+        preload: preload,
+        create: create,
+        update: update
+    },
+    backgroundColor: '#FFFFFF',
+    pixelArt: false // Enable texture smoothing
+};
+
+var bgConfig = {
+    scale: 1,
+    x: 0,
+    y: 0,
+    originX: 0,
+    originY: 0
+};
+
+let switchConfig = {
+    scale: 1,
+    x: 420,
+    originX: 0,
+    originY: 0.5,
+    xNudge: 0,
+    yNudge: 0,
+    font: 'Calibri',
+    textSize: 16,
+    textTint: '#FFFFFF',
+    textPositionLeftOfSwitch: 10,
+    showSweep: {
+        y: 260,
+        words: 'Sweep',
+        startState: 'on'
+    }
+};
+
+const pi = 3.142;
+
+var sliderConfig = {
+    handle: {
+        scale: 0.25,
+        originX: 0.5,
+        originY: 0.5,
+        slideLeftX: 74,
+        slideRightX: 432
+    },
+    sliders: {
+        angularVelocityHandle: { // radians/s
+            y: 354,
+            minVal: 0,
+            maxVal: pi,
+            startVal: pi/4
+        },
+        radiusHandle: { // seconds
+            y: 436,
+            minVal: 0, // display
+            maxVal: 4,
+            startVal: 2,
+            minStopper: 0.5 // minimum allowed value before slider stops out on slide
+        }     
+    },
+    track: {
+        lineThickness: 4,
+        lineTint: '0xFFA218'
+    }
+};
+
+let circleConfig = {
+    topLeftX: 690,
+    topLeftY: 43,
+    bottomRightX: 1097,
+    bottomRightY: 450,
+    velocityScale: 0.016,
+    radius: 4, // This is in units specified in the background graphics
+    updatesInOneSecond: 60,
+    circumference: {
+        lineTint: '0xFFFFFF',
+        lineThickness: 2
+    },
+    arc: {
+        lineTint: '0xFFA218',
+        lineThickness: 8
+    },
+    sector: {
+        fillTint: '0xFFA218',
+        fillAlph: 0.5
+    }
+}
+
+let vectorsConfig = {
+    lineThickness: 4,
+    lengthScale: 40,
+    arrows: { //images
+        scale: 1,
+        originX: 0.5,
+        originY: 0.2
+    },
+    IDText: { //images
+        x: 1000,
+        y: 300,
+        scale: 1,
+        originX: 0.5,
+        originY: 0.5,
+        distance: 30 //from vector line       
+    },
+    v: {
+        lineTint: '0xFFFFFF', //white
+        arrow: 'vectorArrowWhite-img',
+        label: 'vText-img' 
+    }
+};
+
+let game = new Phaser.Game(config);
+let sliders = [];
+
+let background;
+let circle;
+let ui;
+
+let values = {
+    angularVelocity: sliderConfig.sliders.angularVelocityHandle.startVal,
+    radius: sliderConfig.sliders.radiusHandle.startVal,
+    radiusInPixels: null
+}
+
+const valueKeysMapping = {
+    'angularVelocityHandle': 'angularVelocity',
+    'radiusHandle': 'radius'
+};
+
+class Vector {
+    constructor(scene, vectorType, startX, startY, endX, endY, arrowName, labelName) {
+
+        this.scene = scene;
+        this.type = vectorType; //takes values 'v', 'v1', 'v2', 'a' or 'resultant'
+        this.startX = startX;
+        this.startY = startY;
+        this.endX = endX;
+        this.endY = endY;
+
+        this.config = vectorsConfig;
+
+        this.lineGraphics = null;
+        this.arrowImage = null;
+        this.annotationImage = null;
+
+        this.arrowImageName = arrowName;
+        this.annotationImageName = labelName;
+    }
+
+    create() {
+        if (!this.lineGraphics) {
+            this.lineGraphics = this.scene.add.graphics();
+        }
+
+        this.arrowImage = this.scene.add.image(0, 0, this.arrowImageName);
+        this.arrowImage.setOrigin(this.config.arrows.originX, this.config.arrows.originY);
+        this.arrowImage.setScale(this.config.arrows.scale);
+
+        this.annotationImage = this.scene.add.image(this.config.IDText.x, this.config.IDText.y, this.annotationImageName);
+        this.annotationImage.setScale(this.config.IDText.scale);
+        this.annotationImage.setOrigin(this.config.IDText.originX, this.config.IDText.originY);
+
+        this.updateGraphics();
+    }
+
+    updateGraphics() {
+        // Update the line graphics
+        this.lineGraphics.clear();
+        this.lineGraphics.lineStyle(this.config.lineThickness, this.config[this.type].lineTint);
+        this.lineGraphics.beginPath();
+        this.lineGraphics.moveTo(this.startX, this.startY);
+        this.lineGraphics.lineTo(this.endX, this.endY);
+        this.lineGraphics.strokePath();
+
+        // Update the arrow position
+        const angle = Phaser.Math.Angle.Between(this.startX, this.startY, this.endX, this.endY);
+        this.arrowImage.setPosition(this.endX, this.endY); // Place the arrow at the end of the line
+        this.arrowImage.setRotation(angle + Phaser.Math.PI2 / 4); // Rotate to match the direction of the line
+
+        // Update the annotation position
+        const distance = this.config.IDText.distance;
+        const annotationOffsetX = distance * Math.cos(angle);
+        const annotationOffsetY = distance * Math.sin(angle);
+        this.annotationImage.setPosition(this.endX + annotationOffsetX, this.endY + annotationOffsetY); // Position annotation just beyond the arrowhead
+    }
+}
+
+class UI {
+    constructor(scene, circle) {
+        this.scene = scene;
+        this.circle = circle; //reference to the circle class instance
+        this.switches = {};
+    }
+
+    create() {
+        // Create the showSweep switch
+        this.createSwitch('showSweep', switchConfig.showSweep);
+    }
+
+    createSwitch(key, config) {
+        // Determine initial state image
+        const initialState = config.startState === 'on' ? 'switchOn-img' : 'switchOff-img';
+        
+        // Create the switch image with hand cursor
+        const switchImage = this.scene.add.image(switchConfig.x, config.y, initialState)
+            .setScale(switchConfig.scale)
+            .setOrigin(switchConfig.originX, switchConfig.originY)
+            .setInteractive({ cursor: 'pointer' });
+
+        // Store the switch state and image
+        this.switches[key] = {
+            state: config.startState,
+            image: switchImage
+        };
+
+        // Add the toggle functionality
+        switchImage.on('pointerdown', () => {
+            this.toggleSwitch(key);
+        });
+
+        // Add the label text
+        this.scene.add.text(
+            switchConfig.x - switchConfig.textPositionLeftOfSwitch,
+            config.y,
+            config.words,
+            {
+                font: `${switchConfig.textSize}px ${switchConfig.font}`,
+                fill: Phaser.Display.Color.HexStringToColor(switchConfig.textTint).rgba,
+            }
+        ).setOrigin(1, 0.5); // Align text to the left of the switch
+    }
+
+    toggleSwitch(key) {
+        const switchData = this.switches[key];
+
+        // Toggle the state
+        switchData.state = switchData.state === 'on' ? 'off' : 'on';
+
+        // Update the switch image
+        const newStateImage = switchData.state === 'on' ? 'switchOn-img' : 'switchOff-img';
+        switchData.image.setTexture(newStateImage);
+
+        // Update the global state variables and call the appropriate method on Visualization
+        if (key === 'showSweep') {
+            this.circle.toggleSweepVisibility();
+        }
+    }
+}
+
+class Circle {
+    constructor(scene) {
+        this.scene = scene;
+        this.angleDeg = 0; // Initial angle in degrees for bob
+        this.radius = values.radiusInPixels;
+        this.centerX = circleConfig.topLeftX + ((circleConfig.bottomRightX - circleConfig.topLeftX) / 2); // X coordinate of the circle's center
+        this.centerY = circleConfig.topLeftY + ((circleConfig.bottomRightY - circleConfig.topLeftY) / 2); // Y coordinate of the circle's center
+        this.bob = null; // Placeholder for the bob image
+        this.circleGraphics = null; // Placeholder for the circle graphics
+        this.arcGraphics = null; // Graphics object for the arc
+        this.sectorGraphics = null; // Graphics object for the sector
+        this.sweepIsVisible = true;
+
+        // Arc and sector tracking
+        this.arcStartAngleDeg = 0; // Start angle in degrees
+        this.arcAngleDeg = this.angleDeg;
+        this.arcEndAngleDeg = this.arcStartAngleDeg + Phaser.Math.RadToDeg(values.angularVelocity);
+
+        // v vector
+        this.vVector = null;
+    }
+
+    create() {
+        // Create the bob image
+        this.bob = this.scene.add.image(this.centerX, this.centerY, 'bob-img');
+        this.bob.setScale(1); // Adjust scale as needed
+        this.bob.setOrigin(0.5, 0.5); // Center the origin for proper rotation
+
+        // Initialize the circle, arc, and sector graphics
+        this.circleGraphics = this.scene.add.graphics();
+        this.arcGraphics = this.scene.add.graphics();
+        this.sectorGraphics = this.scene.add.graphics(); // Add sector graphics object
+        this.drawCircumference();
+
+        let vectorEnd = this.calculateVelocityVectorEndCoords();
+
+        //Initialise the v velocity vector
+        this.vVector = new Vector(this.scene, 'v', this.bob.x, this.bob.y, vectorEnd.endX, vectorEnd.endY, 'vectorArrowWhite-img', 'vText-img');
+        this.vVector.create();
+    }
+
+    toggleSweepVisibility(){
+
+        if (this.sweepIsVisible) {
+
+            this.arcGraphics.clear();
+            this.sectorGraphics.clear();
+
+            this.sweepIsVisible = false;
+        } else {
+
+            this.resetSweep();
+            this.sweepIsVisible = true
+        }
+    }
+
+    updateOnSliderDrag() {
+        // Recalculate the radius in pixels when the slider is dragged
+        this.radius = values.radiusInPixels || (circleConfig.bottomRightX - circleConfig.topLeftX) / 2;
+        this.drawCircumference();
+    }
+
+    updateOnTick() {
+        // Update the angle based on the angular velocity from the slider (degrees per second)
+        let angularVelocityDeg = values.angularVelocity * (180 / Math.PI); // Convert radians to degrees
+        this.angleDeg += angularVelocityDeg * circleConfig.velocityScale;
+
+        // Calculate the bob's new position based on the updated angle (degrees) and radius
+        let angleRad = Phaser.Math.DegToRad(this.angleDeg); // Convert angle to radians for trigonometric calculations
+        let x = this.centerX + this.radius * Math.cos(angleRad);
+        let y = this.centerY + this.radius * Math.sin(angleRad);
+
+        // Update the bob's position
+        this.bob.setPosition(x, y);
+
+        // Track whether the arc is bigger than the angle swept in 1 second and handle drawing of the arc and sector
+        this.arcEndAngleDeg = this.arcStartAngleDeg + Phaser.Math.RadToDeg(values.angularVelocity);
+
+        if (this.angleDeg >= this.arcEndAngleDeg) {
+            this.arcAngleDeg = this.arcEndAngleDeg; // Start angle in degrees
+            this.drawArc(); // Draw arc after a second
+            this.drawSector(); // Draw sector
+
+            this.arcStartAngleDeg = this.arcEndAngleDeg;
+        } else {
+            this.arcAngleDeg = this.angleDeg;
+            this.drawArc(); // Draw arc on every update
+            this.drawSector(); // Draw sector
+        }
+
+        // Update velocity vector
+
+        let vectorEnd = this.calculateVelocityVectorEndCoords();
+
+        this.vVector.startX = this.bob.x;
+        this.vVector.startY = this.bob.y;
+        this.vVector.endX = vectorEnd.endX;
+        this.vVector.endY = vectorEnd.endY;
+
+        this.vVector.updateGraphics();      
+
+    }
+
+    drawArc() {
+        if (this.arcGraphics && this.sweepIsVisible) {
+            // Clear previous drawings
+            this.arcGraphics.clear();
+
+            // Convert angles from degrees to radians
+            let startAngleRad = Phaser.Math.DegToRad(this.arcStartAngleDeg); // Start angle in radians
+            let endAngleRad = Phaser.Math.DegToRad(this.arcAngleDeg); // End angle in radians
+
+            // Set the line style for the arc
+            this.arcGraphics.lineStyle(circleConfig.arc.lineThickness, circleConfig.arc.lineTint);
+
+            this.arcGraphics.beginPath();
+            this.arcGraphics.arc(
+                this.centerX,
+                this.centerY,
+                this.radius,
+                startAngleRad,
+                endAngleRad,
+                false
+            );
+            this.arcGraphics.strokePath(); // End the current drawing path
+        }
+    }
+
+    resetSweep() {
+        this.arcStartAngleDeg = this.angleDeg; //set the sweep to the current bob angle
+    }
+
+    drawSector() {
+        if (this.sectorGraphics && this.sweepIsVisible) {
+            // Clear previous drawings
+            this.sectorGraphics.clear();
+
+            // Convert angles from degrees to radians
+            let startAngleRad = Phaser.Math.DegToRad(this.arcStartAngleDeg); // Start angle in radians
+            let endAngleRad = Phaser.Math.DegToRad(this.arcAngleDeg); // End angle in radians
+
+            this.sectorGraphics.beginPath();
+            this.sectorGraphics.moveTo(this.centerX, this.centerY);
+            this.sectorGraphics.arc(
+                this.centerX,
+                this.centerY,
+                this.radius,
+                startAngleRad,
+                endAngleRad,
+                false
+            );
+            this.sectorGraphics.lineTo(this.centerX, this.centerY);
+            this.sectorGraphics.closePath(); // Close the path to fill the sector
+            this.sectorGraphics.fillStyle(circleConfig.sector.fillTint, circleConfig.sector.fillAlph);
+            this.sectorGraphics.fillPath(); // Fill the sector
+        }
+    }
+
+    drawCircumference() {
+        const radiusInPixels = values.radiusInPixels;
+
+        if (radiusInPixels !== null && this.circleGraphics) {
+            this.circleGraphics.clear(); // Clear previous circumference drawings
+
+            // Set the circle's line style
+            this.circleGraphics.lineStyle(circleConfig.circumference.lineThickness, circleConfig.circumference.lineTint);
+            this.circleGraphics.strokeCircle(this.centerX, this.centerY, radiusInPixels);
+        }
+    }
+
+    calculateVelocityVectorEndCoords() {
+
+        const dx = this.bob.x - this.centerX;
+        const dy = this.bob.y - this.centerY;
+
+        // Normalize the direction vector (get unit vector)
+        const length = Math.sqrt(dx * dx + dy * dy);
+        const unitDx = dx / length;
+        const unitDy = dy / length;
+
+        // Rotate the direction vector 90 degrees clockwise to get the correct velocity direction
+        const velocityDx = -unitDy;   // 90 degree rotation clockwise: (x, y) -> (-y, x)
+        const velocityDy = unitDx;
+
+        const tangentialVelocity = values.angularVelocity * values.radius;
+
+        // Calculate the end point of the velocity vector
+        const vectorLength = tangentialVelocity * vectorsConfig.lengthScale;
+        const endX = this.bob.x + velocityDx * vectorLength;
+        const endY = this.bob.y + velocityDy * vectorLength;
+
+        // Return the start and end coordinates
+        return {
+            endX: endX,
+            endY: endY
+        };        
+    }
+}
+
+class CustomImage {
+    constructor(scene, imageName, configRef){
+        this.scene = scene;
+        this.imageName = imageName;
+        this.configRef = configRef;
+    }
+
+    create(){
+        this.image = this.scene.add.image(this.configRef.x, this.configRef.y, this.imageName);
+        this.image.setScale(this.configRef.scale);
+        this.image.setOrigin(this.configRef.originX, this.configRef.originY);
+    }
+
+    setPosition(x, y) {
+        this.image.setPosition(x, y);
+    }
+
+    setVisible(visible) {
+        this.image.setVisible(visible);
+    }
+}
+
+class Slider {
+    constructor(scene, name) {
+        this.scene = scene;
+        this.name = name;
+        this.config = sliderConfig.sliders[name];
+        this.handleConfig = sliderConfig.handle;
+        this.handle = null;
+        this.track = null;
+    }
+
+    create() {
+        this.createTrack(); // Create track before creating handle
+        this.handle = this.scene.add.image(this.calculateInitialPosition(), this.config.y, 'handle');
+        this.handle.setOrigin(this.handleConfig.originX, this.handleConfig.originY);
+        this.handle.setScale(this.handleConfig.scale);
+        this.handle.setInteractive({ useHandCursor: true });
+        this.addDragBehavior();
+        this.updateTrack(); // Initial track update
+
+        if (this.name === 'radiusHandle') {
+            this.calculateRadiusInPixels(sliderConfig.sliders.radiusHandle.startVal); // Call to ensure radius is recalculated
+        }
+    }
+
+    createTrack() {
+        const { slideLeftX, slideRightX, y } = this.handleConfig;
+        this.track = this.scene.add.graphics();
+        this.track.lineStyle(sliderConfig.track.lineThickness, sliderConfig.track.lineTint);
+        this.updateTrack(); // Ensure track is initially updated
+    }
+
+    destroyTrack() {
+        if (this.track) {
+            this.track.destroy();
+            this.track = null;
+        }
+    }
+
+    updateTrack() {
+        if (this.handle && this.track) {
+            const { slideLeftX, slideRightX } = this.handleConfig;
+            const handleX = this.handle.x;
+            const { y } = this.config;
+            const zeroX = this.convertValueToPosition(0);
+            const clampedZeroX = Phaser.Math.Clamp(zeroX, slideLeftX, slideRightX);
+            this.track.clear();
+            this.track.lineStyle(sliderConfig.track.lineThickness, sliderConfig.track.lineTint);
+            this.track.beginPath();
+            this.track.moveTo(clampedZeroX, y);
+            this.track.lineTo(handleX, y);
+            this.track.strokePath();
+        }
+    }
+
+    calculateInitialPosition(startValue = this.config.startVal) {
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const { minVal, maxVal } = this.config;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (startValue - minVal) / range;
+        return slideLeftX + valueRatio * sliderRange;
+    }
+
+    addDragBehavior() {
+        this.scene.input.setDraggable(this.handle);
+        this.handle.on('drag', (pointer, dragX) => {
+            // Adjust dragX to respect the minimum value if it's a radiusHandle
+            if (this.name === 'radiusHandle') {
+                let minValue = this.config.minStopper;
+                let minX = this.convertValueToPosition(minValue);
+                dragX = Phaser.Math.Clamp(dragX, minX, this.handleConfig.slideRightX);
+            } else {
+                dragX = Phaser.Math.Clamp(dragX, this.handleConfig.slideLeftX, this.handleConfig.slideRightX);
+            }
+
+            this.handle.x = dragX;
+            this.updateTrack();
+
+            const newValue = this.calculateValue();
+            
+            // Use the mapping to correctly update the values object
+            const mappedKey = valueKeysMapping[this.name];
+            values[mappedKey] = newValue;
+
+            if (this.name === 'radiusHandle') {
+                this.calculateRadiusInPixels(newValue);
+            }
+
+            this.updateCircle();
+        });
+    }
+
+    updateCircle() {
+        circle.updateOnSliderDrag();
+    }
+
+    calculateRadiusInPixels(value){
+        const unitsToPixels = (circleConfig.bottomRightX - circleConfig.topLeftX) / (2 * circleConfig.radius);
+        const radiusInPixels = value * unitsToPixels;
+
+        values.radiusInPixels = radiusInPixels;
+    }
+
+    calculateValue() {
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const { minVal, maxVal } = this.config;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (this.handle.x - slideLeftX) / sliderRange;
+        return minVal + valueRatio * range;
+    }
+
+    convertValueToPosition(value) {
+        const { minVal, maxVal } = this.config;
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (value - minVal) / range;
+        return slideLeftX + valueRatio * sliderRange;
+    }
+}
+
+function preload() {
+    // Load backgrounds
+    this.load.image('vEqualsOmegaR-bg', 'vEqualsOmegaR_bg.PNG');
+
+    // Load slider handle images
+    this.load.image('handle', 'handle.png');
+
+    // Load the bob that moves in a circle
+    this.load.image('bob-img', 'bob_img.png');
+
+    // Load on and off images for slide switches
+    this.load.image('switchOn-img', 'switchOn_img.png');
+    this.load.image('switchOff-img', 'switchOff_img.png');
+
+    // Load vector arrows
+    this.load.image('vectorArrowWhite-img', 'vectorArrowWhite_img.png');
+
+    // Load vector labels
+    this.load.image('vText-img', 'vText_img.png');
+
+    // Load sliders
+    let sliderNames = Object.keys(sliderConfig.sliders);
+    sliderNames.forEach(name => {
+        let slider = new Slider(this, name);
+        sliders.push(slider);
+    });
+}
+
+function create() {
+
+    // Create backgrounds
+    background = new CustomImage(this, 'vEqualsOmegaR-bg', bgConfig);
+    background.create();
+
+    // Create sliders
+    sliders.forEach(slider => slider.create());
+
+    circle = new Circle(this);
+    circle.create();
+
+    //Create the UI
+    ui = new UI(this, circle);
+    ui.create();
+}
+
+function update() {
+    if (circle) {
+        circle.updateOnTick();
+    }
+}
+</script>

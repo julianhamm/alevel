@@ -1,0 +1,408 @@
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.15.1/dist/phaser-arcade-physics.min.js"></script>
+<script>
+
+var config = {
+    width: 1200,
+    height: 500,
+    type: Phaser.AUTO,
+    scene: {
+        preload: preload,
+        create: create,
+        update: update
+    },
+    backgroundColor: '#FFFFFF',
+    pixelArt: false // Enable texture smoothing
+};
+
+var bgConfig = {
+    scale: 1,
+    x: 0,
+    y: 0,
+    originX: 0,
+    originY: 0
+};
+
+const pi = 3.142;
+
+var sliderConfig = {
+    handle: {
+        scale: 0.25,
+        originX: 0.5,
+        originY: 0.5,
+        slideLeftX: 74,
+        slideRightX: 432
+    },
+    sliders: {
+        angularVelocityHandle: { // radians/s
+            y: 277,
+            minVal: 0,
+            maxVal: 4 * pi,
+            startVal: pi
+        },
+        periodHandle: { // seconds
+            y: 360,
+            minVal: 0, // display
+            maxVal: 4,
+            startVal: 2,
+            minStopper: 0.5 // minimum allowed value before slider stops out on slide
+        },
+         frequencyHandle: { // hertz
+            y: 444,
+            minVal: 0,
+            maxVal: 2,
+            startVal: 0.5
+        }       
+    },
+    track: {
+        lineThickness: 4,
+        lineTint: '0xFFA218'
+    }
+};
+
+let circleConfig = {
+    topLeftX: 690,
+    topLeftY: 43,
+    bottomRightX: 1097,
+    bottomRightY: 450,
+    velocityScale: 0.016, // The velocity is non-specific - it just defines some sort of increment
+    sector: {
+        fillTint: '0xFFA218',
+        fillAlph: 0.5
+    }
+}
+
+let game = new Phaser.Game(config);
+let sliders = [];
+
+let background;
+let calculationManager;
+let circle;
+
+let values = {
+    angularVelocity: sliderConfig.sliders.angularVelocityHandle.startVal,
+    period: sliderConfig.sliders.periodHandle.startVal,
+    frequency: sliderConfig.sliders.frequencyHandle.startVal
+}
+
+class Circle {
+    constructor(scene) {
+        this.scene = scene;
+        this.angle = 0; // Initial angle in radians
+        this.angleDeg = 0; // Initial angle in degrees
+        this.radius = (circleConfig.bottomRightX - circleConfig.topLeftX) / 2; // Radius of the circle
+        this.centerX = circleConfig.topLeftX + this.radius; // X coordinate of the circle's center
+        this.centerY = circleConfig.topLeftY + this.radius; // Y coordinate of the circle's center
+        this.bob = null; // Placeholder for the bob image
+        this.sectorGraphics = null; // Graphics to hold the sweep
+
+        // Arc and sector tracking
+        this.arcStartAngleDeg = 0; // Start angle in degrees
+        this.arcAngleDeg = this.angleDeg;
+        this.arcEndAngleDeg = this.arcStartAngleDeg + Phaser.Math.RadToDeg(values.angularVelocity);
+    }
+
+    create() {
+        // Create the bob image
+        this.bob = this.scene.add.image(this.centerX, this.centerY, 'bob-img');
+        this.bob.setScale(1); // Adjust scale as needed
+        this.bob.setOrigin(0.5, 0.5); // Center the origin for proper rotation
+        this.sectorGraphics = this.scene.add.graphics(); // Add sector graphics object
+    }
+
+    update() {
+        // Update the angle based on angular velocity from values object
+        let angularVelocity = values.angularVelocity; // Angular velocity (radians per second)
+        this.angle += angularVelocity * circleConfig.velocityScale;
+        this.angleDeg = Phaser.Math.RadToDeg(this.angle);
+
+        // Calculate the bob's new position
+        let x = this.centerX + this.radius * Math.cos(this.angle);
+        let y = this.centerY + this.radius * Math.sin(this.angle);
+
+        // Update the bob's position
+        this.bob.setPosition(x, y);
+
+        // Track whether the arc is bigger than the angle swept in 1 second and handle drawing of the arc and sector
+        this.arcEndAngleDeg = this.arcStartAngleDeg + Phaser.Math.RadToDeg(values.angularVelocity);
+
+        if (this.angleDeg >= this.arcEndAngleDeg) {
+            this.arcAngleDeg = this.arcEndAngleDeg; // Start angle in degrees
+            this.drawSector(); // Draw sector
+
+            this.arcStartAngleDeg = this.arcEndAngleDeg;
+        } else {
+            this.arcAngleDeg = this.angleDeg;
+            this.drawSector(); // Draw sector
+        }
+    }
+
+    resetSweep() {
+        this.arcStartAngleDeg = this.angleDeg; //set the sweep to the current bob angle
+    }
+
+    drawSector() {
+
+        if (this.sectorGraphics) {
+            // Clear previous drawings
+            this.sectorGraphics.clear();
+
+            // Convert angles from degrees to radians
+            let startAngleRad = Phaser.Math.DegToRad(this.arcStartAngleDeg); // Start angle in radians
+            let endAngleRad = Phaser.Math.DegToRad(this.arcAngleDeg); // End angle in radians
+
+            this.sectorGraphics.beginPath();
+            this.sectorGraphics.moveTo(this.centerX, this.centerY);
+            this.sectorGraphics.arc(
+                this.centerX,
+                this.centerY,
+                this.radius,
+                startAngleRad,
+                endAngleRad,
+                false
+            );
+            this.sectorGraphics.lineTo(this.centerX, this.centerY);
+            this.sectorGraphics.closePath(); // Close the path to fill the sector
+            this.sectorGraphics.fillStyle(circleConfig.sector.fillTint, circleConfig.sector.fillAlph);
+            this.sectorGraphics.fillPath(); // Fill the sector
+        }
+    }
+}
+
+class CalculationManager {
+
+    constructor() {
+        this.updateValues(values.angularVelocity, values.period, values.frequency);
+    }
+
+    updateValues(omega, period, frequency) {
+        this.w = omega;
+        this.T = period;
+        this.f = frequency;
+    }
+
+    calculateOtherValues(input, value) {
+        if (input === 'w') { // Angular velocity is given
+            let f = value / (2 * pi);
+            let T = 1 / f;
+            this.updateValues(value, T, f);
+        } else if (input === 'T') { // Period is given
+            let f = 1 / value;
+            let w = 2 * pi * f;
+            this.updateValues(w, value, f);
+        } else if (input === 'f') { // Frequency is given
+            let w = 2 * pi * value;
+            let T = 1 / value;
+            this.updateValues(w, T, value);
+        }
+
+        // Update the global values object
+        values.angularVelocity = this.w;
+        values.period = this.T;
+        values.frequency = this.f;
+    }
+}
+
+class CustomImage {
+    constructor(scene, imageName, configRef){
+        this.scene = scene;
+        this.imageName = imageName;
+        this.configRef = configRef;
+    }
+
+    create(){
+        this.image = this.scene.add.image(this.configRef.x, this.configRef.y, this.imageName);
+        this.image.setScale(this.configRef.scale);
+        this.image.setOrigin(this.configRef.originX, this.configRef.originY);
+    }
+
+    setPosition(x, y) {
+        this.image.setPosition(x, y);
+    }
+
+    setVisible(visible) {
+        this.image.setVisible(visible);
+    }
+}
+
+class Slider {
+    constructor(scene, name) {
+        this.scene = scene;
+        this.name = name;
+        this.config = sliderConfig.sliders[name];
+        this.handleConfig = sliderConfig.handle;
+        this.handle = null;
+        this.track = null;
+    }
+
+    create() {
+        this.createTrack(); // Create track before creating handle
+        this.handle = this.scene.add.image(this.calculateInitialPosition(), this.config.y, 'handle');
+        this.handle.setOrigin(this.handleConfig.originX, this.handleConfig.originY);
+        this.handle.setScale(this.handleConfig.scale);
+        this.handle.setInteractive({ useHandCursor: true });
+        this.addDragBehavior();
+        this.updateTrack(); // Initial track update
+    }
+
+    createTrack() {
+        const { slideLeftX, slideRightX, y } = this.handleConfig;
+        this.track = this.scene.add.graphics();
+        this.track.lineStyle(sliderConfig.track.lineThickness, sliderConfig.track.lineTint);
+        this.updateTrack(); // Ensure track is initially updated
+    }
+
+    destroyTrack() {
+        if (this.track) {
+            this.track.destroy();
+            this.track = null;
+        }
+    }
+
+    updateTrack() {
+        if (this.handle && this.track) {
+            const { slideLeftX, slideRightX } = this.handleConfig;
+            const handleX = this.handle.x;
+            const { y } = this.config;
+            const zeroX = this.convertValueToPosition(0);
+            const clampedZeroX = Phaser.Math.Clamp(zeroX, slideLeftX, slideRightX);
+            this.track.clear();
+            this.track.lineStyle(sliderConfig.track.lineThickness, sliderConfig.track.lineTint);
+            this.track.beginPath();
+            this.track.moveTo(clampedZeroX, y);
+            this.track.lineTo(handleX, y);
+            this.track.strokePath();
+        }
+    }
+
+    calculateInitialPosition(startValue = this.config.startVal) {
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const { minVal, maxVal } = this.config;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (startValue - minVal) / range;
+        return slideLeftX + valueRatio * sliderRange;
+    }
+
+    addDragBehavior() {
+        let returnedValue;
+
+        this.scene.input.setDraggable(this.handle);
+        this.handle.on('drag', (pointer, dragX) => {
+            // Adjust dragX to respect the minimum value if it's a periodHandle
+            if (this.name === 'periodHandle') {
+                let minValue = this.config.minStopper;
+                let minX = this.convertValueToPosition(minValue);
+                dragX = Phaser.Math.Clamp(dragX, minX, this.handleConfig.slideRightX);
+            } else {
+                dragX = Phaser.Math.Clamp(dragX, this.handleConfig.slideLeftX, this.handleConfig.slideRightX);
+            }
+
+            this.handle.x = dragX;
+            this.updateTrack();
+
+            returnedValue = this.calculateValue();
+            this.updateValues(returnedValue);
+        });
+    }
+
+    calculateValue() {
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const { minVal, maxVal } = this.config;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (this.handle.x - slideLeftX) / sliderRange;
+        return minVal + valueRatio * range;
+    }
+
+    updateValues(value) {
+        if (this.name === 'angularVelocityHandle') {
+            calculationManager.calculateOtherValues('w', value);
+        } else if (this.name === 'periodHandle') {
+            calculationManager.calculateOtherValues('T', value);
+        } else if (this.name === 'frequencyHandle') {
+            calculationManager.calculateOtherValues('f', value);
+        }
+
+        // Update slider positions based on new calculated values
+        sliders.forEach(slider => {
+            if (slider.name === 'angularVelocityHandle') {
+                slider.updatePosition(values.angularVelocity);
+            } else if (slider.name === 'periodHandle') {
+                slider.updatePosition(values.period);
+            } else if (slider.name === 'frequencyHandle') {
+                slider.updatePosition(values.frequency);
+            }
+        });
+    }
+
+    updatePosition(newValue) {
+        const position = this.convertValueToPosition(newValue);
+        const { maxVal } = this.config;
+
+        // Handle period slider minimum value condition
+        if (this.name === 'periodHandle' && newValue < this.config.minStopper) {
+            this.handle.setTexture('handle'); // Keep normal handle color
+            this.handle.x = this.convertValueToPosition(this.config.minStopper);
+        } else if (newValue > maxVal) {
+            this.handle.setTexture('handleInactive'); // Change to inactive handle image
+            this.handle.x = this.handleConfig.slideRightX; // Lock to the right-hand end
+        } else {
+            this.handle.setTexture('handle'); // Revert to active handle image
+            this.handle.x = position; // Update position normally
+        }
+
+        this.updateTrack();
+    }
+
+    convertValueToPosition(value) {
+        const { minVal, maxVal } = this.config;
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (value - minVal) / range;
+        return slideLeftX + valueRatio * sliderRange;
+    }
+}
+
+function preload() {
+    // Load backgrounds
+    this.load.image('angularVelocity-bg', 'angularVelocity_bg.PNG');
+
+    // Load slider handle images
+    this.load.image('handle', 'handle.png');
+    this.load.image('handleInactive', 'handle_inactive.png');
+
+    // Load the bob that moves in a circle
+    this.load.image('bob-img', 'bob_img.png');
+
+    // Load sliders
+    let sliderNames = Object.keys(sliderConfig.sliders);
+    sliderNames.forEach(name => {
+        let slider = new Slider(this, name);
+        sliders.push(slider);
+    });
+}
+
+function create() {
+
+    // Create backgrounds
+    background = new CustomImage(this, 'angularVelocity-bg', bgConfig);
+    background.create();
+
+    // Create sliders
+    sliders.forEach(slider => slider.create());
+
+    // Create a calculation manager instance
+    calculationManager = new CalculationManager();
+
+    circle = new Circle(this);
+    circle.create();
+
+}
+
+function update() {
+    if (circle) {
+        circle.update();
+    }
+}
+</script>
