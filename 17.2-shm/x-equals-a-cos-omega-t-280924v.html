@@ -1,0 +1,979 @@
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.15.1/dist/phaser-arcade-physics.min.js"></script>
+<script>
+
+var config = {
+    width: 1200,
+    height: 500,
+    type: Phaser.AUTO,
+    scene: {
+        preload: preload,
+        create: create,
+        update: update
+    },
+    backgroundColor: '#FFFFFF',
+    pixelArt: false // Enable texture smoothing
+};
+
+var bgConfig = {
+    scale: 1,
+    x: 0,
+    y: 0,
+    originX: 0,
+    originY: 0
+};
+
+const pi = 3.142;
+const g = 9.81;
+
+var sliderConfig = {
+    handle: {
+        scale: 0.25,
+        originX: 0.5,
+        originY: 0.5,
+        slideLeftX: 107,
+        slideRightX: 373
+    },
+    sliders: {
+        amplitudeHandle: { // degrees
+            y: 331,
+            minVal: 0.1,
+            maxVal: 0.5,
+            startVal: 0.3
+        },
+        omegaHandle: {
+            y: 441,
+            minVal: pi / 4,
+            maxVal: pi / 2,
+            startVal: 3 * pi / 8
+        }     
+    },
+    track: {
+        lineThickness: 4,
+        lineTint: '0xFFA218' //orange
+    }
+};
+
+let switchConfig = {
+    scale: 1,
+    x: 530,
+    originX: 0,
+    originY: 0.5,
+    xNudge: 0,
+    yNudge: 0,
+    font: 'Calibri',
+    textSize: 16,
+    textTint: '#FFFFFF',
+    textPositionLeftOfSwitch: 10,
+    trace: {
+        y: 406,
+        words: 'trace',
+        startState: 'off'
+    },
+    gradient: {
+        y: 436,
+        words: 'gradient',
+        startState: 'off'
+    }
+};
+
+const visualizationConfig = {
+    timeStepPerTick: 0.05, // seconds
+    numberOfPeriods: 2, // max time plotted on the graphs
+    grid: {
+        topLeftX: 597,
+        topLeftY: 41,
+        bottomRightX: 1161,
+        bottomRightY: 451,
+        squaresAcross: 11,
+        squaresDown: 9
+    },
+    graphs: {
+        startXSquares: 3,
+        endXSquares: 11,
+        maxYValueMagnitudeSquares: 1,
+        plot: {
+            lineThickness: 2,
+            lineTint: '0xFFA218' //orange
+        },
+        gradient: {
+            image: 'gradientLine-img', //bright green line
+            originX: 0.5,
+            originY: 0.5          
+        },
+        trace: {
+            image: 'trace-img',
+            originX: 0.5,
+            originY: 0.5            
+        },
+        x: {
+            squaresDown: 1,
+            maxValue: 0.5,
+            minValue: -0.5
+        },
+        v: {
+            squaresDown: 4,
+            maxValue: 0.8,
+            minValue: -0.8
+        },
+        a: {
+            squaresDown: 7,
+            maxValue: 1.3,
+            minValue: -1.3
+        }      
+    },
+    pendulum: {
+        topSquaresDown: 0,
+        topSquaresAcross: 1,
+        lengthScaleSquaresPerMetre: 0.5,
+        displacementMultiplier: 3,
+        rod: {
+            thickness: 4,
+            tint: '0xFFFFFF', // white
+        },
+        bob: {
+            image: 'bob-img',
+            originX: 0.5,
+            originY: 0.5
+        }
+    }
+}
+
+const uiConfig = {
+    playControls: {
+        depth: 500,
+        playPause: {
+            x: 544,
+            y: 57,
+            originX: 0.5,
+            originY: 0.5            
+        },
+        reset: {
+            x: 544,
+            y: 111,
+            originX: 0.5,
+            originY: 0.5          
+        }
+    }
+}
+
+let values = {
+    A: sliderConfig.sliders.amplitudeHandle.startVal, // metres
+    omega: sliderConfig.sliders.omegaHandle.startVal // radians per second
+};
+
+let info = {
+    squareSideLengthPixels: null,
+    pendulumLength: null,
+    pendulum: {
+        topX: null,
+        topY: null
+    },
+    period: null
+}
+
+// Global variable to store the pendulum's motion data at different time steps
+let motionData = [
+    // Each object in the array will represent a time step in the pendulum's motion
+    // Example structure:
+    // { time: 0, x: 0, y: 0, velocity: 0, acceleration: 0 }
+];
+
+let motionStepIndex = 0;  // keeps track of the current index when outputting values from the pre-calculated array
+
+const valueKeysMapping = {
+    'amplitudeHandle': 'A',
+    'omegaHandle': 'omega'
+};
+
+let game = new Phaser.Game(config);
+let sliders = [];
+let playStatus = 'paused'; // values 'playing' and 'paused'
+let showTrace = false;
+let showGradient = false;
+
+let visualization;
+let ui;
+let graph;
+let pendulum;
+let physics;
+
+let background;
+
+class Test {
+    constructor(scene, x, y) {
+        this.scene = scene;
+        this.x = x;
+        this.y = y;
+        this.handle = null;
+    }
+
+    create() {
+
+        // Create the handle image with 50% alpha
+        this.handle = this.scene.add.image(this.x, this.y, 'handle');
+        this.handle.setAlpha(0.5);
+        this.handle.setScale(0.2); // Scale the handle to 20%
+        this.handle.setInteractive({ useHandCursor: true });
+
+        // Make the handle draggable
+        this.scene.input.setDraggable(this.handle);
+
+        // Output the coordinates to the console when dragging
+        this.handle.on('drag', (pointer, dragX, dragY) => {
+            this.handle.setPosition(dragX, dragY);
+            console.log(`x: ${dragX}, y: ${dragY}`);
+        });
+    }
+}
+
+class Visualization {
+    constructor(scene) {
+        this.scene = scene;
+    }
+
+    create() {
+        this.calculateUsefulValues();
+        physics.calculatePeriod();
+        physics.initialisePendulum();
+        physics.populateMotionData();
+        pendulum.create();
+        graph.create();
+    }
+
+    calculateUsefulValues() {
+
+        const pendulumConfig = visualizationConfig.pendulum;
+        const gridConfig = visualizationConfig.grid;
+        
+        const gridWidthPixels = gridConfig.bottomRightX - gridConfig.topLeftX;
+        const squareSideLengthPixels = gridWidthPixels / gridConfig.squaresAcross;
+        info.squareSideLengthPixels = squareSideLengthPixels;
+
+        // Calculate the pendulum's pivot point (topX and topY) in pixels
+        const topX = gridConfig.topLeftX + pendulumConfig.topSquaresAcross * squareSideLengthPixels;
+        const topY = gridConfig.topLeftY + pendulumConfig.topSquaresDown * squareSideLengthPixels;
+        info.pendulum.topX = topX;
+        info.pendulum.topY = topY;
+    }
+
+    updateOnSliderDrag(sliderType) {
+        physics.calculatePeriod();
+        physics.initialisePendulum();
+        physics.populateMotionData();
+        pendulum.update();
+        graph.plotAllGraphs();
+        graph.updateTrace();
+        graph.updateGradientLines();
+    }
+
+    updateOnTick() {
+        motionStepIndex++;
+
+        // Check if motionStepIndex exceeds the length of motionData
+        if (motionStepIndex >= motionData.length) {
+            motionStepIndex = 0;  // Reset to zero for looping
+        }
+
+        pendulum.update();
+        graph.updateTrace();
+        graph.updateGradientLines();
+    }
+
+    reset() {
+        // Reset motionStepIndex
+        motionStepIndex = 0;
+        ui.pause();
+
+        // Reset each slider to its initial position
+        sliders.forEach(slider => {
+            slider.setValue(slider.config.startVal);
+        });
+
+        // Update the values object to reflect the initial slider positions
+        values.A = sliderConfig.sliders.amplitudeHandle.startVal;
+        values.omega = sliderConfig.sliders.omegaHandle.startVal;
+
+        // Recalculate the pendulum's period and reset motion data
+        physics.calculatePeriod();
+        physics.initialisePendulum();
+        physics.populateMotionData();
+
+        // Replot graphs to regenerate graphCoords in motionData
+        graph.plotAllGraphs();
+
+        // Update the pendulum and traces to reflect the reset state
+        pendulum.update();
+        graph.updateTrace();  // This is now safe as graphCoords is ensured to exist
+        graph.updateGradientLines();
+    }
+
+    toggleShowTrace() {
+        graph.toggleTraceVisibility();
+    }
+
+    toggleShowGradient() {
+        graph.toggleGradientVisibility();
+    }
+}
+
+class Pendulum {
+    constructor(scene) {
+        this.scene = scene;
+        this.rod = null;   // The rod of the pendulum (will be drawn using a Phaser graphics object)
+        this.bob = null;   // The pendulum bob (will be a Phaser image)
+    }
+
+    create() {
+        // Create the pendulum rod and bob graphics initially
+        this.rod = this.scene.add.graphics();  // Create an empty graphics object for the rod
+        this.bob = this.scene.add.image(0, 0, visualizationConfig.pendulum.bob.image); // Create the bob image
+        this.bob.setOrigin(visualizationConfig.pendulum.bob.originX, visualizationConfig.pendulum.bob.originY);
+        
+        this.placePendulum();  // Position the pendulum initially
+    }
+
+    update() {
+        this.resetPendulum();  // Reset the graphics before drawing updated positions
+        this.placePendulum();  // Reposition the pendulum based on updated motion data
+    }
+
+    placePendulum() {
+        if (motionData.length > 0) {
+            const pendulumState = motionData[motionStepIndex];  // Get the current state for the pendulum bob
+            if(typeof pendulumState === 'undefined') console.log("pendulumState " + motionStepIndex);
+
+            const bobX = pendulumState.displayX;  // Use displayX for animation (adjusted value)
+            const bobY = pendulumState.y;  // Bob's y position
+
+            const topX = info.pendulum.topX;  // Fixed top anchor x position
+            const topY = info.pendulum.topY;  // Fixed top anchor y position
+
+            // Draw the rod (a line from the top point to the bob)
+            this.rod.clear();  // Clear any previous drawing
+            this.rod.lineStyle(visualizationConfig.pendulum.rod.thickness, visualizationConfig.pendulum.rod.tint);  // Set rod thickness and color
+            this.rod.beginPath();
+            this.rod.moveTo(topX, topY);  // Move to the top anchor point
+            this.rod.lineTo(bobX, bobY);  // Draw a line to the bob's position
+            this.rod.strokePath();  // Finalize the drawing
+
+            // Set the bob's position
+            this.bob.setPosition(bobX, bobY);  // Update the bob's position based on motion data
+        }
+    }
+
+    resetPendulum() {
+        // Clear the current graphics (rod and bob) so they can be redrawn cleanly
+        this.rod.clear();  // Clear the graphics for the rod before redrawing
+    }
+}
+
+class Physics {
+    constructor() {
+        // Nothing here yet, but could be expanded as needed
+    }
+
+    calculatePeriod() {
+        const omega = values.omega; // Retrieve the angular frequency (omega) from slider values
+        const period = (2 * pi) / omega; // Calculate the period T = 2π / ω
+
+        // Store the period in the info object
+        info.period = period;
+    }
+
+    initialisePendulum() {
+        // Clear any existing motion data
+        motionData = [];
+
+        // Retrieve necessary configuration values and global constants
+        const lengthScale = visualizationConfig.pendulum.lengthScaleSquaresPerMetre; // Scale to convert metres to grid squares
+        const amplitude = values.A; // Amplitude from the slider (meters)
+        const omega = values.omega; // Angular frequency (radians per second)
+        const squareSideLengthPixels = info.squareSideLengthPixels; // Pixels per square
+
+        // Retrieve fixed top anchor point from info
+        const topX = info.pendulum.topX;
+        const topY = info.pendulum.topY;
+
+        // Calculate the pendulum length in meters using the formula: L = g / omega^2
+        const pendulumLengthMeters = g / (omega * omega);
+
+        // Scale the pendulum length to grid squares
+        const pendulumLengthInSquares = pendulumLengthMeters * lengthScale;
+
+        // Convert the pendulum length to pixels
+        const pendulumLengthInPixels = pendulumLengthInSquares * squareSideLengthPixels;
+
+        // Store the pendulum length in the info object (in both squares and pixels)
+        info.pendulumLength = pendulumLengthInPixels;
+
+        // Call method to populate motion data based on time increments
+        //this.populateMotionData();
+    }
+
+    populateMotionData() {
+        // Use values directly from the info and values objects
+        const amplitude = values.A;
+        const omega = values.omega;
+        const period = info.period;
+        const topX = info.pendulum.topX;
+        const topY = info.pendulum.topY;
+        const pendulumLengthInPixels = info.pendulumLength;
+
+        // Calculate the total time to simulate (for the number of periods defined)
+        const totalTime = visualizationConfig.numberOfPeriods * period;
+        const timeStep = visualizationConfig.timeStepPerTick; // Time step per tick
+
+        // Calculate the total number of steps (integer)
+        const numSteps = Math.floor(totalTime / timeStep);
+
+        // Loop through the calculated number of steps
+        for (let i = 0; i <= numSteps; i++) {
+            // Calculate the current time for this step
+            const t = i * timeStep;
+
+            // Calculate horizontal displacement using x(t) = A cos(omega * t)
+            const x = amplitude * Math.cos(omega * t);
+            const xInPixels = x * info.squareSideLengthPixels * visualizationConfig.pendulum.displacementMultiplier;
+
+            // Calculate vertical displacement using y(t) = sqrt(L^2 - x^2)
+            const y = Math.sqrt(pendulumLengthInPixels * pendulumLengthInPixels - xInPixels * xInPixels);
+
+            // Calculate velocity v(t) = -A omega sin(omega t)
+            const velocity = -amplitude * omega * Math.sin(omega * t);
+
+            // Calculate acceleration a(t) = -A omega^2 cos(omega t)
+            const acceleration = -amplitude * omega * omega * Math.cos(omega * t);
+
+            // Calculate displayX by adjusting with displacementMultiplier
+            const displayX = topX + xInPixels; // Adjusted horizontal displacement
+            const adjustedY = topY + y;  // y is vertical, no multiplier applied
+
+            // Push both the actual x and displayX values into the motionData array
+            motionData.push({
+                time: t,
+                x: x,  // Actual x value (for graphing, relative to pivot)
+                displayX: displayX,  // Adjusted x value (for animation)
+                y: adjustedY,
+                velocity: velocity,
+                acceleration: acceleration
+            });
+        }
+    }
+}
+
+class Graph {
+    constructor(scene) {
+        this.scene = scene;
+        this.displacementGraph = null;  // Graphics object for displacement plot
+        this.velocityGraph = null;      // Graphics object for velocity plot
+        this.accelerationGraph = null;  // Graphics object for acceleration plot
+        
+        // Trace blobs for each graph
+        this.displacementTrace = null;
+        this.velocityTrace = null;
+        this.accelerationTrace = null;
+
+        // Gradient lines for displacement and velocity
+        this.displacementGradient = null;
+        this.velocityGradient = null;
+    }
+
+    create() {
+        // Create graphics objects for each plot
+        this.displacementGraph = this.scene.add.graphics();
+        this.velocityGraph = this.scene.add.graphics();
+        this.accelerationGraph = this.scene.add.graphics();
+
+        // Create trace blobs
+        this.displacementTrace = this.scene.add.image(0, 0, visualizationConfig.graphs.trace.image).setVisible(false);
+        this.velocityTrace = this.scene.add.image(0, 0, visualizationConfig.graphs.trace.image).setVisible(false);
+        this.accelerationTrace = this.scene.add.image(0, 0, visualizationConfig.graphs.trace.image).setVisible(false);
+
+        // Set the origin for each trace blob to match config
+        this.displacementTrace.setOrigin(visualizationConfig.graphs.trace.originX, visualizationConfig.graphs.trace.originY);
+        this.velocityTrace.setOrigin(visualizationConfig.graphs.trace.originX, visualizationConfig.graphs.trace.originY);
+        this.accelerationTrace.setOrigin(visualizationConfig.graphs.trace.originX, visualizationConfig.graphs.trace.originY);
+
+        // Create gradient lines
+        this.displacementGradient = this.scene.add.image(0, 0, visualizationConfig.graphs.gradient.image).setVisible(false);
+        this.velocityGradient = this.scene.add.image(0, 0, visualizationConfig.graphs.gradient.image).setVisible(false);
+
+        // Set the origin for each gradient line to match config
+        this.displacementGradient.setOrigin(visualizationConfig.graphs.gradient.originX, visualizationConfig.graphs.gradient.originY);
+        this.velocityGradient.setOrigin(visualizationConfig.graphs.gradient.originX, visualizationConfig.graphs.gradient.originY);
+
+        this.plotAllGraphs();  // Initial plotting when created
+    }
+
+    plotAllGraphs() {
+        // Clear the previous graphs
+        this.displacementGraph.clear();
+        this.velocityGraph.clear();
+        this.accelerationGraph.clear();
+
+        // Set line styles for each graph
+        this.displacementGraph.lineStyle(visualizationConfig.graphs.plot.lineThickness, visualizationConfig.graphs.plot.lineTint);
+        this.velocityGraph.lineStyle(visualizationConfig.graphs.plot.lineThickness, visualizationConfig.graphs.plot.lineTint);
+        this.accelerationGraph.lineStyle(visualizationConfig.graphs.plot.lineThickness, visualizationConfig.graphs.plot.lineTint);
+
+        // Begin drawing paths for each graph
+        this.displacementGraph.beginPath();
+        this.velocityGraph.beginPath();
+        this.accelerationGraph.beginPath();
+
+        // Define the scales for each graph from configuration
+        const dispYScale = info.squareSideLengthPixels / visualizationConfig.graphs.x.maxValue;
+        const velYScale = info.squareSideLengthPixels / visualizationConfig.graphs.v.maxValue;
+        const accYScale = info.squareSideLengthPixels / visualizationConfig.graphs.a.maxValue;
+
+        // Get grid configuration for positioning
+        const gridConfig = visualizationConfig.grid;
+
+        // Translate the graph starting position by adding startXSquares offset
+        const graphBaseX = gridConfig.topLeftX + (visualizationConfig.graphs.startXSquares * info.squareSideLengthPixels);
+        const graphBaseY = gridConfig.topLeftY;
+
+        // Get total width of the time axis (in pixels)
+        const timeAxisWidth = (visualizationConfig.graphs.endXSquares - visualizationConfig.graphs.startXSquares) * info.squareSideLengthPixels;
+
+        // Calculate the maximum period (based on min omega) and the pixel increment per time step
+        const minOmega = sliderConfig.sliders.omegaHandle.minVal; // Minimum omega for max period
+        const maxPeriod = (2 * pi) / minOmega;  // Longest period
+        const stepsPerPeriod = maxPeriod / visualizationConfig.timeStepPerTick;
+        const pixelIncrement = timeAxisWidth / (stepsPerPeriod * 2); // Two periods span the whole width
+
+        // Plot all graphs by looping through the motionData once
+        for (let i = 0; i < motionData.length - 1; i++) {
+            const current = motionData[i];
+            const next = motionData[i + 1];
+
+            // Calculate positions for displacement, velocity, and acceleration on the x-axis
+            const x1 = graphBaseX + (i * pixelIncrement);
+            const x2 = graphBaseX + ((i + 1) * pixelIncrement);
+
+            // Plot displacement
+            const y1_disp = graphBaseY + (visualizationConfig.graphs.x.squaresDown * info.squareSideLengthPixels) - (current.x * dispYScale);
+            const y2_disp = graphBaseY + (visualizationConfig.graphs.x.squaresDown * info.squareSideLengthPixels) - (next.x * dispYScale);
+            this.displacementGraph.moveTo(x1, y1_disp);
+            this.displacementGraph.lineTo(x2, y2_disp);
+
+            // Plot velocity
+            const y1_vel = graphBaseY + (visualizationConfig.graphs.v.squaresDown * info.squareSideLengthPixels) - (current.velocity * velYScale);
+            const y2_vel = graphBaseY + (visualizationConfig.graphs.v.squaresDown * info.squareSideLengthPixels) - (next.velocity * velYScale);
+            this.velocityGraph.moveTo(x1, y1_vel);
+            this.velocityGraph.lineTo(x2, y2_vel);
+
+            // Plot acceleration
+            const y1_acc = graphBaseY + (visualizationConfig.graphs.a.squaresDown * info.squareSideLengthPixels) - (current.acceleration * accYScale);
+            const y2_acc = graphBaseY + (visualizationConfig.graphs.a.squaresDown * info.squareSideLengthPixels) - (next.acceleration * accYScale);
+            this.accelerationGraph.moveTo(x1, y1_acc);
+            this.accelerationGraph.lineTo(x2, y2_acc);
+
+            // Store the calculated coordinates in the motionData array
+            motionData[i].graphCoords = {
+                displacement: { x: x1, y: y1_disp },
+                velocity: { x: x1, y: y1_vel },
+                acceleration: { x: x1, y: y1_acc }
+            };
+
+            // Calculate and store rotations (gradients) for displacement and velocity
+            if (i > 1 && i < motionData.length - 1) { // Start at index 2 (third element) to ensure both previous and next exist
+
+                const prev = motionData[i - 2];
+                const next = motionData[i];
+
+                // For displacement
+                const deltaX_disp = next.graphCoords.displacement.x - prev.graphCoords.displacement.x;
+                const deltaY_disp = prev.graphCoords.displacement.y - next.graphCoords.displacement.y;  // Compensate for y direction
+                let angle_disp = Math.atan2(deltaY_disp, deltaX_disp);
+                motionData[i-1].displacementRotation = 0 - angle_disp;  // Phaser uses clockwise angles
+
+                // For velocity
+                const deltaX_vel = next.graphCoords.velocity.x - prev.graphCoords.velocity.x;
+                const deltaY_vel = prev.graphCoords.velocity.y - next.graphCoords.velocity.y;  // Compensate for y direction
+                let angle_vel = Math.atan2(deltaY_vel, deltaX_vel);
+                motionData[i-1].velocityRotation = 0 - angle_vel;
+            }            
+        }
+
+        // Finalize each plot
+        this.displacementGraph.strokePath();
+        this.velocityGraph.strokePath();
+        this.accelerationGraph.strokePath();
+
+        // Handle edge cases for first and last points
+        if (motionData.length > 1) {
+            // First point takes rotation of second point
+            motionData[0].displacementRotation = motionData[1].displacementRotation;
+            motionData[0].velocityRotation = motionData[1].velocityRotation;
+
+            // Last point takes rotation of second to last point
+            motionData[motionData.length - 1].displacementRotation = motionData[motionData.length - 2].displacementRotation;
+            motionData[motionData.length - 1].velocityRotation = motionData[motionData.length - 2].velocityRotation;
+        }
+    }
+
+    updateTrace() {
+        const current = motionData[motionStepIndex];
+
+        // Check if graphCoords exists before trying to access it
+        if (current.graphCoords) {
+            // Update positions for each trace using precomputed graph coordinates
+            this.displacementTrace.setPosition(current.graphCoords.displacement.x, current.graphCoords.displacement.y);
+            this.velocityTrace.setPosition(current.graphCoords.velocity.x, current.graphCoords.velocity.y);
+            this.accelerationTrace.setPosition(current.graphCoords.acceleration.x, current.graphCoords.acceleration.y);
+        } else {
+            console.warn(`graphCoords missing at motionStepIndex: ${motionStepIndex}`);
+        }
+    }
+
+    updateGradientLines() {
+        const current = motionData[motionStepIndex];
+
+        // Check if graphCoords exists before trying to access it
+        if (current.graphCoords) {
+            
+            // Set position and use the pre-calculated displacement rotation for the displacement gradient
+            this.displacementGradient.setPosition(current.graphCoords.displacement.x, current.graphCoords.displacement.y);
+            this.displacementGradient.setRotation(current.displacementRotation);  // Use pre-calculated displacement rotation
+
+            // Set position and use the pre-calculated velocity rotation for the velocity gradient
+            this.velocityGradient.setPosition(current.graphCoords.velocity.x, current.graphCoords.velocity.y);
+            this.velocityGradient.setRotation(current.velocityRotation);  // Use pre-calculated velocity rotation
+
+        } else {
+            console.warn(`graphCoords missing at motionStepIndex: ${motionStepIndex}`);
+        }
+    }
+
+    // Method to toggle trace visibility
+    toggleTraceVisibility() {
+        this.displacementTrace.setVisible(showTrace);
+        this.velocityTrace.setVisible(showTrace);
+        this.accelerationTrace.setVisible(showTrace);
+    }
+
+    // Method to toggle gradient visibility
+    toggleGradientVisibility() {
+        this.displacementGradient.setVisible(showGradient);
+        this.velocityGradient.setVisible(showGradient);
+    }
+}
+
+class CustomImage {
+    constructor(scene, imageName, configRef){
+        this.scene = scene;
+        this.imageName = imageName;
+        this.configRef = configRef;
+    }
+
+    create(){
+        this.image = this.scene.add.image(this.configRef.x, this.configRef.y, this.imageName);
+        this.image.setScale(this.configRef.scale);
+        this.image.setOrigin(this.configRef.originX, this.configRef.originY);
+    }
+
+    setPosition(x, y) {
+        this.image.setPosition(x, y);
+    }
+
+    setVisible(visible) {
+        this.image.setVisible(visible);
+    }
+}
+
+class Slider {
+    constructor(scene, name) {
+        this.scene = scene;
+        this.name = name;
+        this.config = sliderConfig.sliders[name];
+        this.handleConfig = sliderConfig.handle;
+        this.handle = null;
+        this.track = null;
+    }
+
+    create() {
+        this.createTrack(); // Create track before creating handle
+        this.handle = this.scene.add.image(this.calculateInitialPosition(), this.config.y, 'handle');
+        this.handle.setOrigin(this.handleConfig.originX, this.handleConfig.originY);
+        this.handle.setScale(this.handleConfig.scale);
+        this.handle.setInteractive({ useHandCursor: true });
+        this.addDragBehavior();
+        this.updateTrack(); // Initial track update
+    }
+
+    createTrack() {
+        const { slideLeftX, slideRightX, y } = this.handleConfig;
+        this.track = this.scene.add.graphics();
+        this.track.lineStyle(sliderConfig.track.lineThickness, sliderConfig.track.lineTint);
+        this.updateTrack(); // Ensure track is initially updated
+    }
+
+    destroyTrack() {
+        if (this.track) {
+            this.track.destroy();
+            this.track = null;
+        }
+    }
+
+    updateTrack() {
+        if (this.handle && this.track) {
+            const { slideLeftX, slideRightX } = this.handleConfig;
+            const handleX = this.handle.x;
+            const { y } = this.config;
+            const zeroX = this.convertValueToPosition(0);
+            const clampedZeroX = Phaser.Math.Clamp(zeroX, slideLeftX, slideRightX);
+            this.track.clear();
+            this.track.lineStyle(sliderConfig.track.lineThickness, sliderConfig.track.lineTint);
+            this.track.beginPath();
+            this.track.moveTo(clampedZeroX, y);
+            this.track.lineTo(handleX, y);
+            this.track.strokePath();
+        }
+    }
+
+    calculateInitialPosition(startValue = this.config.startVal) {
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const { minVal, maxVal } = this.config;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (startValue - minVal) / range;
+        return slideLeftX + valueRatio * sliderRange;
+    }
+
+    addDragBehavior() {
+        this.scene.input.setDraggable(this.handle);
+        this.handle.on('drag', (pointer, dragX) => {
+
+            dragX = Phaser.Math.Clamp(dragX, this.handleConfig.slideLeftX, this.handleConfig.slideRightX);
+
+            this.handle.x = dragX;
+            this.updateTrack();
+
+            const newValue = this.calculateValue();
+            
+            // Use the mapping to correctly update the values object
+            const mappedKey = valueKeysMapping[this.name];
+            values[mappedKey] = newValue;
+
+            visualization.updateOnSliderDrag(mappedKey);
+        });
+    }
+
+    calculateValue() {
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const { minVal, maxVal } = this.config;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (this.handle.x - slideLeftX) / sliderRange;
+        return minVal + valueRatio * range;
+    }
+
+    convertValueToPosition(value) {
+        const { minVal, maxVal } = this.config;
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (value - minVal) / range;
+        return slideLeftX + valueRatio * sliderRange;
+    }
+
+    // New Method: Set the slider to a specific value
+    setValue(value) {
+        // Convert the value to a position on the slider track
+        const position = this.convertValueToPosition(value);
+        // Update the handle's x position to match the value
+        this.handle.x = Phaser.Math.Clamp(position, this.handleConfig.slideLeftX, this.handleConfig.slideRightX);
+        // Update the track to match the new handle position
+        this.updateTrack();
+    }
+}
+
+class UI {
+    constructor(scene) {
+        this.scene = scene;
+        this.switches = {};
+        this.switchLabels = {}; // Store switch label texts
+        this.playPauseButton = null; // To store the play/pause button
+        this.resetButton = null;     // To store the reset button
+        this.config = uiConfig;
+    }
+
+    create() {
+        this.createPlayPauseButton();
+        this.createResetButton();
+        this.createSwitch('showTrace', switchConfig.trace);
+        this.createSwitch('showGradient', switchConfig.gradient);
+    }
+
+    createPlayPauseButton() {
+        // Initially create the play button
+        this.playPauseButton = this.scene.add.image(this.config.playControls.playPause.x, this.config.playControls.playPause.y, 'playBtn-img');
+        this.playPauseButton.setOrigin(this.config.playControls.playPause.originX, this.config.playControls.playPause.originY);
+        this.playPauseButton.setInteractive({ useHandCursor: true });
+        this.playPauseButton.setDepth(this.config.playControls.depth);
+
+        this.playPauseButton.on('pointerdown', () => {
+            if (playStatus === 'paused') {
+                this.play();  // Switch to play
+                playStatus = 'playing';
+
+            } else {
+                this.pause();  // Switch to pause
+                playStatus = 'paused';
+            }
+        });
+    }
+
+    play() {
+        playStatus = 'playing';
+        this.updatePlayPauseButton();  // Update the button to show the pause image
+        // Add code here to start/resume the simulation if needed
+    }
+
+    pause() {
+        playStatus = 'paused';
+        this.updatePlayPauseButton();  // Update the button to show the play image
+        // Add code here to pause the simulation if needed
+    }
+
+    updatePlayPauseButton() {
+        // Change the button image based on the current play status
+        if (playStatus === 'playing') {
+            this.playPauseButton.setTexture('pauseBtn-img');
+        } else {
+            this.playPauseButton.setTexture('playBtn-img');
+        }
+    }
+
+    createResetButton() {
+        // Create the reset button below the play/pause button
+        this.resetButton = this.scene.add.image(this.config.playControls.reset.x, this.config.playControls.reset.y, 'resetBtn-img');
+        this.resetButton.setOrigin(this.config.playControls.reset.originX, this.config.playControls.reset.originY);
+        this.resetButton.setInteractive({ useHandCursor: true });
+        this.resetButton.setDepth(this.config.playControls.depth);
+
+        this.resetButton.on('pointerdown', () => {
+            this.resetSimulation();  // Trigger the reset action
+        });
+    }
+
+    createSwitch(key, config) {
+        // Determine initial state image
+        const initialState = config.startState === 'on' ? 'switchOn-img' : 'switchOff-img';
+        
+        // Create the switch image with hand cursor
+        const switchImage = this.scene.add.image(switchConfig.x, config.y, initialState)
+            .setScale(switchConfig.scale)
+            .setOrigin(switchConfig.originX, switchConfig.originY)
+            .setInteractive({ cursor: 'pointer' });
+
+        // Store the switch state and image
+        this.switches[key] = {
+            state: config.startState,
+            image: switchImage
+        };
+
+        // Add the toggle functionality
+        switchImage.on('pointerdown', () => {
+            this.toggleSwitch(key);
+        });
+
+        // Add the label text for the switch
+        const switchLabel = this.scene.add.text(
+            switchConfig.x - switchConfig.textPositionLeftOfSwitch,
+            config.y,
+            config.words,
+            {
+                font: `${switchConfig.textSize}px ${switchConfig.font}`,
+                fill: Phaser.Display.Color.HexStringToColor(switchConfig.textTint).rgba,
+            }
+        ).setOrigin(1, 0.5); // Align text to the left of the switch
+
+        this.switchLabels[key] = switchLabel; // Store label text for toggling visibility
+    }
+
+    toggleSwitch(key) {
+        const switchData = this.switches[key];
+
+        // Toggle the state
+        switchData.state = switchData.state === 'on' ? 'off' : 'on';
+
+        // Update the switch image
+        const newStateImage = switchData.state === 'on' ? 'switchOn-img' : 'switchOff-img';
+        switchData.image.setTexture(newStateImage);
+
+        // Update the global state variables and call the appropriate method on Visualization
+        if (key === 'showTrace') {
+            showTrace = switchData.state === 'on'; // Update global variable
+            visualization.toggleShowTrace(); // Notify Visualization
+        } else if (key === 'showGradient') {
+            showGradient = switchData.state === 'on'; // Update global variable
+            visualization.toggleShowGradient(); // Notify Visualization
+        }
+    }
+
+    resetSimulation() {
+        visualization.reset();
+    }
+}
+
+function preload() {
+    // Load backgrounds
+    this.load.image('xEqualsACosOmegaT-bg', 'xEqualsACosOmegaT_bg.PNG'); // upper case png is important for GitHub
+
+    // Load slider handle images
+    this.load.image('handle', 'handle.png');
+
+    // Load on and off images for slide switches
+    this.load.image('switchOn-img', 'switchOn_img.png');
+    this.load.image('switchOff-img', 'switchOff_img.png');
+
+    this.load.image('playBtn-img', 'playBtn_img.png');
+    this.load.image('pauseBtn-img', 'pauseBtn_img.png');
+    this.load.image('resetBtn-img', 'resetBtn_img.png');
+
+    // Load pendulum bob image
+    this.load.image('bob-img', 'bob_img.png');
+
+    // Load dot that traces the current time on the graphs and gradient line
+    this.load.image('trace-img', 'trace_img.png');
+    this.load.image('gradientLine-img', 'gradientLine_img.png');
+
+    // Load sliders
+    let sliderNames = Object.keys(sliderConfig.sliders);
+    sliderNames.forEach(name => {
+        let slider = new Slider(this, name);
+        sliders.push(slider);
+    });
+}
+
+function create() {
+
+    // Create backgrounds
+    background = new CustomImage(this, 'xEqualsACosOmegaT-bg', bgConfig);
+    background.create();
+
+    //let testObject = new Test(this, 100, 100); // Starting position (100, 100)
+    //testObject.create();
+
+    // Create sliders
+    sliders.forEach(slider => slider.create());
+
+    ui = new UI(this);
+    ui.create();
+
+    graph = new Graph(this);
+
+    pendulum = new Pendulum(this);
+
+    physics = new Physics();
+
+    visualization = new Visualization(this);
+    visualization.create();
+}
+
+function update() {
+    if (playStatus === 'playing') visualization.updateOnTick();
+}
+</script>
