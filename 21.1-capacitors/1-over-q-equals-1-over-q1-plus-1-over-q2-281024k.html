@@ -1,0 +1,860 @@
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.15.1/dist/phaser-arcade-physics.min.js"></script>
+<script>
+
+var config = {
+    width: 1200,
+    height: 500,
+    type: Phaser.AUTO,
+    scene: {
+        preload: preload,
+        create: create,
+        update: update
+    },
+    backgroundColor: '#FFFFFF',
+    pixelArt: false // Enable texture smoothing
+};
+
+var bgConfig = {
+    scale: 1,
+    x: 0,
+    y: 0,
+    originX: 0,
+    originY: 0
+};
+
+var sliderConfig = {
+    handle: {
+        scale: 0.25,
+        originX: 0.5,
+        originY: 0.5,
+        slideLeftX: 107,
+        slideRightX: 376
+    },
+    sliders: {
+        C1Handle: { // degrees
+            y: 290,
+            minVal: 1,
+            maxVal: 5,
+            startVal: 3,
+            mode: 'input'
+        },
+        C2Handle: {
+            y: 367,
+            minVal: 1,
+            maxVal: 5,
+            startVal: 3,
+            mode: 'input'
+        },
+        CHandle: {
+            y: 453,
+            minVal: 0,
+            maxVal: 5,
+            startVal: 1.5,
+            mode: 'output'
+        }    
+    },
+    track: {
+        lineThickness: 4,
+        lineTint: '0xFFA218' //orange
+    }
+};
+
+const platesConfig = {
+    position: {
+        y: 201,
+        separation: 65,
+        C1: {
+            leftPlateX: 641
+        },
+        C2: {
+            leftPlateX: 854
+        },
+    },
+    size: {
+        minHeight: 50,
+        maxHeight: 130
+    },
+    format: {
+        lineThickness: 4,
+        lineTint: '0xFFFFFF' //white
+    }
+}
+
+const voltageBarConfig = {
+    y: 150,
+    width: 30,
+    maxHeight: 80,
+    V1x: 599,
+    V2x: 814,
+    lineThickness: 2,
+    lineTint: '0xFFA218' //orange
+}
+
+const switchConfig = {
+    contact: {
+        rightEnd: {
+            x: 903,
+            y: 57
+        },
+        leftEnd: {
+            closed: {
+                x: 859,
+                y: 50
+            },
+            open: {
+                x: 868,
+                y: 33
+            }
+        },
+        format: {
+            lineThickness: 4,
+            lineTint: '0xFFFFFF' //white
+        }
+    },
+    hitArea: {
+        bottomLeftX: 850,
+        bottomLeftY: 74,
+        width: 75,
+        height: 50
+    }
+}
+
+let info = {
+    C1: {
+        charge: null,
+        pd: null,
+    },
+    C2: {
+        charge: null,
+        pd: null
+    },
+    C: {
+        capacitance: null
+    },
+    QExact: null
+}
+
+let values = {
+    C1: sliderConfig.sliders.C1Handle.startVal,
+    C2: sliderConfig.sliders.C2Handle.startVal,
+    V: 3, 
+    C: null
+};
+
+const chargesConfig = {
+    positive: {
+        originX: 0,
+        originY: 0.5
+    },
+    negative: {
+        originX: 1,
+        originY: 0.5        
+    },
+    wires: {
+        originX: 0.5,
+        originY: 0.5,
+        travel: 100,
+        maxCharge: sliderConfig.sliders.C1Handle.maxVal * 2 * values.V,
+        charge1: { x: 548, y: 210, movement: 'down', restriction: 'none' },
+        charge2: { x: 548, y: 303, movement: 'down', restriction: 'none' },
+        charge3: { x: 575, y: 411, movement: 'right', restriction: 'none' },
+        charge4: { x: 677, y: 411, movement: 'right', restriction: 'none' },
+        charge5: { x: 833, y: 411, movement: 'right', restriction: 'none' },
+        charge6: { x: 921, y: 411, movement: 'right', restriction: 'none' },
+        charge7: { x: 1066, y: 384, movement: 'up', restriction: 'none' },
+        charge8: { x: 1066, y: 298, movement: 'up', restriction: 'none' },
+        charge9: { x: 990, y: 183, movement: 'left', restriction: 'not shorted' },
+        charge10: { x: 987, y: 41, movement: 'left', restriction: 'shorted' },
+        charge11: { x: 846, y: 41, movement: 'left', restriction: 'shorted' },
+        charge12: { x: 737, y: 69, movement: 'down', restriction: 'shorted' },
+        charge13: { x: 800, y: 183, movement: 'left', restriction: 'not shorted' }
+    }
+};
+
+const valueKeysMapping = {
+    'C1Handle': 'C1',
+    'C2Handle': 'C2',
+    'CHandle': 'C'
+};
+
+let switchOpen = true;
+
+let game = new Phaser.Game(config);
+let sliders = [];
+
+let visualization;
+let calculations;
+let charges;
+let charts;
+let shortSwitch;
+
+let background;
+
+class Test {
+    constructor(scene, x, y) {
+        this.scene = scene;
+        this.x = x;
+        this.y = y;
+        this.handle = null;
+    }
+
+    create() {
+
+        // Create the handle image with 50% alpha
+        this.handle = this.scene.add.image(this.x, this.y, 'handle');
+        this.handle.setAlpha(0.5);
+        this.handle.setScale(0.2); // Scale the handle to 20%
+        this.handle.setInteractive({ useHandCursor: true });
+
+        // Make the handle draggable
+        this.scene.input.setDraggable(this.handle);
+
+        // Output the coordinates to the console when dragging
+        this.handle.on('drag', (pointer, dragX, dragY) => {
+            this.handle.setPosition(dragX, dragY);
+            console.log(`x: ${dragX}, y: ${dragY}`);
+        });
+    }
+}
+
+class Switch {
+    constructor(scene) {
+        this.scene = scene;
+        this.isClosed = false; // Track if the switch is closed (shorting C2)
+        this.contactBar = null; // Graphics object for the switch contact
+    }
+
+    create() {
+        // Draw the initial (open) switch state
+        this.drawContact();
+
+        // Set up the interactive area for the switch toggle
+        this.createHitArea();
+    }
+
+    drawContact() {
+        const { lineThickness, lineTint } = switchConfig.contact.format;
+        const { leftEnd, rightEnd } = switchConfig.contact;
+        
+        // Clear previous drawing if it exists
+        if (this.contactBar) {
+            this.contactBar.clear();
+        } else {
+            // Create graphics object if not already present
+            this.contactBar = this.scene.add.graphics();
+        }
+
+        // Set line style and draw contact bar based on open or closed state
+        this.contactBar.lineStyle(lineThickness, lineTint);
+        this.contactBar.beginPath();
+        const leftPosition = this.isClosed ? leftEnd.closed : leftEnd.open;
+        this.contactBar.moveTo(leftPosition.x, leftPosition.y);
+        this.contactBar.lineTo(rightEnd.x, rightEnd.y);
+        this.contactBar.strokePath();
+    }
+
+    createHitArea() {
+        const { bottomLeftX, bottomLeftY, width, height } = switchConfig.hitArea;
+
+        // Create an invisible rectangle for the interactive hit area
+        const hitArea = this.scene.add.rectangle(
+            bottomLeftX + width / 2,
+            bottomLeftY - height / 2,
+            width,
+            height,
+            0x000000,
+            0 // Invisible
+        ).setInteractive({ useHandCursor: true });
+
+        // Toggle switch state when the hit area is clicked
+        hitArea.on('pointerdown', () => {
+            this.toggleSwitch();
+        });
+    }
+
+    toggleSwitch() {
+        switchOpen = !switchOpen;
+
+        this.isClosed = !this.isClosed; // Toggle switch state
+        this.drawContact(); // Redraw the switch in the new state
+
+        // Trigger recalculations based on switch state
+        calculations.calculateEffectiveCapacitance();
+        calculations.calculateCharge();
+        calculations.calculatePD();
+
+        // Update the charge placement and bar charts as well
+        charges.placeChargesOnPlate();
+        charts.drawCharts();
+
+        // Update the charges on the wires
+        charges.updateNegativeChargesOnWires();
+
+    }
+}
+
+class Charts {
+    constructor(scene) {
+        this.scene = scene;
+        this.V1Bar = null; // Graphics object for C1 bar chart
+        this.V2Bar = null; // Graphics object for C2 bar chart
+    }
+
+    drawCharts() {
+        const { y, width, maxHeight, V1x, V2x, lineThickness, lineTint } = voltageBarConfig;
+
+        // Create or clear the V1Bar chart for C1
+        if (!this.V1Bar) {
+            this.V1Bar = this.scene.add.graphics();
+        }
+        this.V1Bar.clear();
+        this.V1Bar.lineStyle(lineThickness, lineTint);
+
+        // Calculate the height of V1 bar based on info.C1.pd and maxHeight
+        const V1Height = Phaser.Math.Clamp(
+            (info.C1.pd / values.V) * maxHeight,
+            0,
+            maxHeight
+        );
+
+        // Draw outline rectangle for V1Bar (potential difference across C1)
+        this.V1Bar.strokeRect(V1x, y - V1Height, width, V1Height);
+
+        // Create or clear the V2Bar chart for C2
+        if (!this.V2Bar) {
+            this.V2Bar = this.scene.add.graphics();
+        }
+        this.V2Bar.clear();
+        this.V2Bar.lineStyle(lineThickness, lineTint);
+
+        // Calculate the height of V2 bar based on info.C2.pd and maxHeight
+        const V2Height = Phaser.Math.Clamp(
+            (info.C2.pd / values.V) * maxHeight,
+            0,
+            maxHeight
+        );
+
+        // Draw outline rectangle for V2Bar (potential difference across C2)
+        this.V2Bar.strokeRect(V2x, y - V2Height, width, V2Height);
+    }
+}
+
+class Visualization {
+    constructor(scene) {
+        this.scene = scene;
+        this.C1LeftPlate = null;
+        this.C1RightPlate = null;
+        this.C2LeftPlate = null;
+        this.C2RightPlate = null;
+    }
+
+    create() {
+        this.createPlates();
+        calculations.calculateEffectiveCapacitance();
+        calculations.calculateCharge();
+        charges.placeChargesOnPlate();
+        calculations.calculatePD();
+        charges.createNegativeChargesOnWires();
+        charges.updateNegativeChargesOnWires();
+    }
+
+    createPlates() {
+        const { lineThickness, lineTint } = platesConfig.format;
+
+        // Create graphics objects for all plates
+        this.C1LeftPlate = this.scene.add.graphics();
+        this.C1RightPlate = this.scene.add.graphics();
+        this.C2LeftPlate = this.scene.add.graphics();
+        this.C2RightPlate = this.scene.add.graphics();
+
+        // Initial drawing of plates based on starting values
+        this.updatePlates();
+    }
+
+    updatePlates() {
+        const { y, separation, C1, C2 } = platesConfig.position;
+        const { minHeight, maxHeight } = platesConfig.size;
+        const { lineThickness, lineTint } = platesConfig.format;
+
+        // Clear previous drawings for all plates
+        this.C1LeftPlate.clear();
+        this.C1RightPlate.clear();
+        this.C2LeftPlate.clear();
+        this.C2RightPlate.clear();
+
+        // Calculate heights based on C1 and C2 capacitance values
+        const C1Height = Phaser.Math.Interpolation.Linear(
+            [minHeight, maxHeight],
+            (values.C1 - sliderConfig.sliders.C1Handle.minVal) /
+            (sliderConfig.sliders.C1Handle.maxVal - sliderConfig.sliders.C1Handle.minVal)
+        );
+
+        const C2Height = Phaser.Math.Interpolation.Linear(
+            [minHeight, maxHeight],
+            (values.C2 - sliderConfig.sliders.C2Handle.minVal) /
+            (sliderConfig.sliders.C2Handle.maxVal - sliderConfig.sliders.C2Handle.minVal)
+        );
+
+        // Set line style for plates
+        this.C1LeftPlate.lineStyle(lineThickness, lineTint);
+        this.C1RightPlate.lineStyle(lineThickness, lineTint);
+        this.C2LeftPlate.lineStyle(lineThickness, lineTint);
+        this.C2RightPlate.lineStyle(lineThickness, lineTint);
+
+        // Draw plates for C1
+        this.C1LeftPlate.beginPath();
+        this.C1LeftPlate.moveTo(C1.leftPlateX, y - C1Height / 2);
+        this.C1LeftPlate.lineTo(C1.leftPlateX, y + C1Height / 2);
+        this.C1LeftPlate.strokePath();
+
+        this.C1RightPlate.beginPath();
+        this.C1RightPlate.moveTo(C1.leftPlateX + separation, y - C1Height / 2);
+        this.C1RightPlate.lineTo(C1.leftPlateX + separation, y + C1Height / 2);
+        this.C1RightPlate.strokePath();
+
+        // Draw plates for C2
+        this.C2LeftPlate.beginPath();
+        this.C2LeftPlate.moveTo(C2.leftPlateX, y - C2Height / 2);
+        this.C2LeftPlate.lineTo(C2.leftPlateX, y + C2Height / 2);
+        this.C2LeftPlate.strokePath();
+
+        this.C2RightPlate.beginPath();
+        this.C2RightPlate.moveTo(C2.leftPlateX + separation, y - C2Height / 2);
+        this.C2RightPlate.lineTo(C2.leftPlateX + separation, y + C2Height / 2);
+        this.C2RightPlate.strokePath();
+    }
+
+    updateOnSliderDrag(sliderType) {
+        if (sliderType === 'C1' || sliderType === 'C2') {
+            this.updatePlates();
+            calculations.calculateEffectiveCapacitance();
+            calculations.calculateCharge();
+            charges.placeChargesOnPlate();
+            calculations.calculatePD();
+            charges.updateNegativeChargesOnWires();
+        }
+    }
+}
+
+class Calculations {
+    constructor() {
+        // nothing obvious here for the moment
+    }
+
+    calculateCharge() {
+        // Get the effective capacitance and total voltage
+        const C_total = info.C.capacitance;
+        const V = values.V;
+
+        // Calculate total charge Q for the series circuit
+        if (C_total > 0) {
+            const QExact = C_total * V; // to make sure the p.d. bar charts change smoothly
+            info.QExact = QExact;
+
+            const Q = Math.round(QExact);
+
+            // Store charge Q in both capacitors since they share the same charge in series
+            info.C1.charge = Q;
+            info.C2.charge = Q;
+        } else {
+            info.C1.charge = 0;
+            info.C2.charge = 0;
+        }
+    }
+
+    calculatePD() {
+        // Calculate p.d. across each capacitor using QExact
+        const QExact = info.QExact;
+        const C1 = values.C1;
+        const C2 = values.C2;
+
+        if (QExact !== null && C1 > 0) {
+            const V_C1 = QExact / C1;
+
+            // Determine V_C2 based on switch status
+            let V_C2 = 0; // Default to 0 if !switchOpen
+            if (switchOpen && C2 > 0) {
+                V_C2 = QExact / C2;
+            }
+
+            // Store these values in the info object
+            info.C1.pd = V_C1;
+            info.C2.pd = V_C2;
+        } else {
+            // Set p.d. to zero if calculations are not possible
+            info.C1.pd = 0;
+            info.C2.pd = 0;
+            console.log("P.D. across C1 and C2 set to 0 V (invalid capacitance or charge)");
+        }
+
+        charts.drawCharts();
+    }
+
+    calculateEffectiveCapacitance() {
+        const C1 = values.C1;
+        const C2 = values.C2;
+
+        // Determine effective capacitance based on switch state
+        const effectiveCapacitance = switchOpen 
+            ? 1 / ((1 / C1) + (1 / C2))  // Switch open: use series combination of C1 and C2
+            : C1;                         // Switch closed: only C1 is effective
+
+        // Update effective capacitance in info object
+        info.C.capacitance = effectiveCapacitance;
+
+        // Update the CHandle slider with the effective capacitance
+        sliders.forEach(slider => {
+            if (slider.name === 'CHandle') {
+                slider.setValue(effectiveCapacitance);
+            }
+        });
+    }
+
+}
+
+class Charges {
+    constructor(scene) {
+        this.scene = scene;
+
+        this.C1PositiveCharges = []; // Positive charges on C1's left plate
+        this.C1NegativeCharges = []; // Negative charges on C1's right plate
+        this.C2PositiveCharges = []; // Positive charges on C2's left plate
+        this.C2NegativeCharges = []; // Negative charges on C2's right plate
+
+        this.wireCharges = [];
+    }
+
+    clearCharges() {
+        // Remove existing charges on C1's plates
+        this.C1PositiveCharges.forEach(charge => charge.destroy());
+        this.C1NegativeCharges.forEach(charge => charge.destroy());
+
+        // Remove existing charges on C2's plates
+        this.C2PositiveCharges.forEach(charge => charge.destroy());
+        this.C2NegativeCharges.forEach(charge => charge.destroy());
+
+        // Clear the arrays
+        this.C1PositiveCharges = [];
+        this.C1NegativeCharges = [];
+        this.C2PositiveCharges = [];
+        this.C2NegativeCharges = [];
+    }
+
+    placeChargesOnPlate() {
+        // Clear any existing charges
+        this.clearCharges();
+
+        // Get the plate configuration for C1 and C2
+        const { y, separation, C1, C2 } = platesConfig.position;
+        const { minHeight, maxHeight } = platesConfig.size;
+
+        // Retrieve the calculated charges for each capacitor
+        const Q1 = info.C1.charge;
+        const Q2 = info.C2.charge;
+
+        // Calculate heights based on capacitance values for visual effect
+        const C1Height = Phaser.Math.Interpolation.Linear(
+            [minHeight, maxHeight],
+            (values.C1 - sliderConfig.sliders.C1Handle.minVal) / 
+            (sliderConfig.sliders.C1Handle.maxVal - sliderConfig.sliders.C1Handle.minVal)
+        );
+
+        const C2Height = Phaser.Math.Interpolation.Linear(
+            [minHeight, maxHeight],
+            (values.C2 - sliderConfig.sliders.C2Handle.minVal) / 
+            (sliderConfig.sliders.C2Handle.maxVal - sliderConfig.sliders.C2Handle.minVal)
+        );
+
+        // Place charges for C1 using the calculated charge Q1
+        if (Q1 > 0) {
+            for (let i = 0; i < Q1; i++) {
+                const chargeY = y - C1Height / 2 + (i / (Q1 - 1)) * C1Height;
+
+                // Positive charge on C1 left plate
+                const C1Positive = this.scene.add.image(C1.leftPlateX, chargeY, 'positive-img');
+                C1Positive.setOrigin(chargesConfig.positive.originX, chargesConfig.positive.originY);
+                this.C1PositiveCharges.push(C1Positive);
+
+                // Negative charge on C1 right plate
+                const C1Negative = this.scene.add.image(C1.leftPlateX + separation, chargeY, 'negative-img');
+                C1Negative.setOrigin(chargesConfig.negative.originX, chargesConfig.negative.originY);
+                this.C1NegativeCharges.push(C1Negative);
+            }
+        }
+
+        // Place charges for C2 using the calculated charge Q2
+        if (Q2 > 0 && switchOpen) {
+            for (let i = 0; i < Q2; i++) {
+                const chargeY = y - C2Height / 2 + (i / (Q2 - 1)) * C2Height;
+
+                // Positive charge on C2 left plate
+                const C2Positive = this.scene.add.image(C2.leftPlateX, chargeY, 'positive-img');
+                C2Positive.setOrigin(chargesConfig.positive.originX, chargesConfig.positive.originY);
+                this.C2PositiveCharges.push(C2Positive);
+
+                // Negative charge on C2 right plate
+                const C2Negative = this.scene.add.image(C2.leftPlateX + separation, chargeY, 'negative-img');
+                C2Negative.setOrigin(chargesConfig.negative.originX, chargesConfig.negative.originY);
+                this.C2NegativeCharges.push(C2Negative);
+            }
+        }
+    }
+
+    // Method to create negative charges on the wires
+    createNegativeChargesOnWires() {
+        const wireChargeData = chargesConfig.wires;
+
+        // Create wire charges based on the configuration
+        Object.keys(wireChargeData).forEach(key => {
+            if (key.startsWith("charge")) {
+                const chargeConfig = wireChargeData[key];
+
+                // Create a negative charge at the starting position
+                const negativeCharge = this.scene.add.image(chargeConfig.x, chargeConfig.y, 'negative-img');
+                negativeCharge.setOrigin(wireChargeData.originX, wireChargeData.originY);
+
+                // Store initial position, movement direction, restriction status, and other properties
+                negativeCharge.initialX = chargeConfig.x;
+                negativeCharge.initialY = chargeConfig.y;
+                negativeCharge.movement = chargeConfig.movement;
+                negativeCharge.restriction = chargeConfig.restriction;
+
+                this.wireCharges.push(negativeCharge);
+            }
+        });
+    }
+
+    updateNegativeChargesOnWires() {
+        const wireChargeData = chargesConfig.wires;
+        const QExact = info.QExact;
+
+        // Loop through each wire charge to update its position based on QExact and switch state
+        this.wireCharges.forEach(charge => {
+            // Handle restrictions based on switch state
+            if (charge.restriction === 'shorted' && !switchOpen) {
+                // Move normally when switch is closed (C2 is shorted)
+            } else if (charge.restriction === 'not shorted' && switchOpen) {
+                // Move normally when switch is open (C2 is not shorted)
+            } else if (charge.restriction !== 'none') {
+                // For restricted charges, reset to initial position when they shouldn't move
+                charge.x = charge.initialX;
+                charge.y = charge.initialY;
+                return; // Skip further position updating
+            }
+
+            // Calculate the fraction of the maximum charge for movement scaling
+            const chargeFraction = QExact / wireChargeData.maxCharge;
+
+            // Determine movement distance based on charge fraction
+            const movementDistance = wireChargeData.travel * chargeFraction;
+
+            // Reset charge position to its initial coordinates before applying movement
+            charge.x = charge.initialX;
+            charge.y = charge.initialY;
+
+            // Adjust the position based on the movement direction and calculated distance
+            switch (charge.movement) {
+                case 'left':
+                    charge.x -= movementDistance;
+                    break;
+                case 'right':
+                    charge.x += movementDistance;
+                    break;
+                case 'up':
+                    charge.y -= movementDistance;
+                    break;
+                case 'down':
+                    charge.y += movementDistance;
+                    break;
+            }
+        });
+    }
+
+}
+
+class CustomImage {
+    constructor(scene, imageName, configRef){
+        this.scene = scene;
+        this.imageName = imageName;
+        this.configRef = configRef;
+    }
+
+    create(){
+        this.image = this.scene.add.image(this.configRef.x, this.configRef.y, this.imageName);
+        this.image.setScale(this.configRef.scale);
+        this.image.setOrigin(this.configRef.originX, this.configRef.originY);
+    }
+
+    setPosition(x, y) {
+        this.image.setPosition(x, y);
+    }
+
+    setVisible(visible) {
+        this.image.setVisible(visible);
+    }
+}
+
+class Slider {
+    constructor(scene, name) {
+        this.scene = scene;
+        this.name = name;
+        this.config = sliderConfig.sliders[name];
+        this.handleConfig = sliderConfig.handle;
+        this.handle = null;
+        this.track = null;
+    }
+
+    create() {
+        this.createTrack(); // Create track before creating handle
+
+        // Choose the handle image based on the slider's mode
+        const handleImage = this.config.mode === 'input' ? 'handle' : 'handle-inactive';
+        
+        // Set up the handle with the chosen image
+        this.handle = this.scene.add.image(this.calculateInitialPosition(), this.config.y, handleImage);
+        this.handle.setOrigin(this.handleConfig.originX, this.handleConfig.originY);
+        this.handle.setScale(this.handleConfig.scale);
+
+        // Only make the handle interactive if it is an input slider
+        if (this.config.mode === 'input') {
+            this.handle.setInteractive({ useHandCursor: true });
+            this.addDragBehavior();
+        }
+
+        // Update track for initial position
+        this.updateTrack();
+    }
+
+    createTrack() {
+        const { slideLeftX, slideRightX, y } = this.handleConfig;
+        this.track = this.scene.add.graphics();
+        this.track.lineStyle(sliderConfig.track.lineThickness, sliderConfig.track.lineTint);
+        this.updateTrack();
+    }
+
+    destroyTrack() {
+        if (this.track) {
+            this.track.destroy();
+            this.track = null;
+        }
+    }
+
+    updateTrack() {
+        if (this.handle && this.track) {
+            const { slideLeftX, slideRightX } = this.handleConfig;
+            const handleX = this.handle.x;
+            const { y } = this.config;
+            const zeroX = this.convertValueToPosition(0);
+            const clampedZeroX = Phaser.Math.Clamp(zeroX, slideLeftX, slideRightX);
+            this.track.clear();
+            this.track.lineStyle(sliderConfig.track.lineThickness, sliderConfig.track.lineTint);
+            this.track.beginPath();
+            this.track.moveTo(clampedZeroX, y);
+            this.track.lineTo(handleX, y);
+            this.track.strokePath();
+        }
+    }
+
+    calculateInitialPosition(startValue = this.config.startVal) {
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const { minVal, maxVal } = this.config;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (startValue - minVal) / range;
+        return slideLeftX + valueRatio * sliderRange;
+    }
+
+    addDragBehavior() {
+        this.scene.input.setDraggable(this.handle);
+        this.handle.on('drag', (pointer, dragX) => {
+            dragX = Phaser.Math.Clamp(dragX, this.handleConfig.slideLeftX, this.handleConfig.slideRightX);
+            this.handle.x = dragX;
+            this.updateTrack();
+            const newValue = this.calculateValue();
+
+            // Use the mapping to correctly update the values object
+            const mappedKey = valueKeysMapping[this.name];
+            values[mappedKey] = newValue;
+
+            visualization.updateOnSliderDrag(mappedKey);
+        });
+    }
+
+    calculateValue() {
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const { minVal, maxVal } = this.config;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (this.handle.x - slideLeftX) / sliderRange;
+        return minVal + valueRatio * range;
+    }
+
+    convertValueToPosition(value) {
+        const { minVal, maxVal } = this.config;
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (value - minVal) / range;
+        return slideLeftX + valueRatio * sliderRange;
+    }
+
+    setValue(value) {
+        // Convert the value to a position on the slider track
+        const position = this.convertValueToPosition(value);
+        // Update the handle's x position to match the value
+        this.handle.x = Phaser.Math.Clamp(position, this.handleConfig.slideLeftX, this.handleConfig.slideRightX);
+        // Update the track to match the new handle position
+        this.updateTrack();
+    }
+}
+
+function preload() {
+    // Load backgrounds
+    this.load.image('1overCEquals1OverC1Plus1OverC2-bg', '1overCEquals1OverC1Plus1OverC2_bg.PNG'); // upper case png is important for GitHub
+
+    // Load slider handle images
+    this.load.image('handle', 'handle.png');
+    this.load.image('handle-inactive', 'handle_inactive.png');
+
+
+    // Load positive and negative charge images
+    this.load.image('positive-img', 'positive_img.png');
+    this.load.image('negative-img', 'negative_img.png');
+
+    // Load sliders
+    let sliderNames = Object.keys(sliderConfig.sliders);
+    sliderNames.forEach(name => {
+        let slider = new Slider(this, name);
+        sliders.push(slider);
+    });
+}
+
+function create() {
+
+    // Create backgrounds
+    background = new CustomImage(this, '1overCEquals1OverC1Plus1OverC2-bg', bgConfig);
+    background.create();
+
+    //let testObject = new Test(this, 100, 100); // Starting position (100, 100)
+    //testObject.create();
+
+    charts = new Charts(this);
+
+    shortSwitch = new Switch(this);
+    shortSwitch.create();
+
+    calculations = new Calculations();
+
+    // Create sliders
+    sliders.forEach(slider => slider.create());
+
+    charges = new Charges(this);
+
+    visualization = new Visualization(this);
+    visualization.create();
+}
+
+function update() {
+    // no update calls
+}
+</script>
