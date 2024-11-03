@@ -1,0 +1,1649 @@
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.15.1/dist/phaser-arcade-physics.min.js"></script>
+<script>
+
+var config = {
+    width: 1200,
+    height: 500,
+    type: Phaser.AUTO,
+    scene: {
+        preload: preload,
+        create: create,
+        update: update
+    },
+    backgroundColor: '#FFFFFF',
+    pixelArt: false // Enable texture smoothing
+};
+
+var bgConfig = {
+    scale: 1,
+    x: 0,
+    y: 0,
+    originX: 0,
+    originY: 0
+};
+
+var sliderConfig = {
+    handle: {
+        scale: 0.25,
+        originX: 0.5,
+        originY: 0.5,
+        slideLeftX: 107,
+        slideRightX: 377
+    },
+    sliders: {
+        CHandle: { // degrees
+            y: 292,
+            minVal: 1,
+            maxVal: 2,
+            startVal: 2
+        },
+        RHandle: {
+            y: 373,
+            minVal: 1,
+            maxVal: 2,
+            startVal: 1
+        },
+        tHandle: {
+            y: 452,
+            minVal: 0,
+            maxVal: 8,
+            startVal: 0
+        }    
+    },
+    track: {
+        lineThickness: 4,
+        lineTint: '0xFFA218' //orange
+    }
+};
+
+const platesConfig = {
+    position: {
+        y: 300,
+        leftX: 523,
+        rightX: 584
+    },
+    size: {
+        minHeight: 50,
+        maxHeight: 100
+    },
+    format: {
+        lineThickness: 4,
+        lineTint: '0xFFFFFF' //white
+    }
+}
+
+const graphConfig = {
+    area: {
+        topLeft: {
+            x: 754,
+            y: 43
+        },
+        bottomRight: {
+            x: 1162,
+            y: 399
+        },
+        squaresAcross: 8,
+        squaresUp: 7
+    },
+    axes: {
+        x: {
+            quantity: 'time',
+            unit: 'seconds',
+            minValue: 0,
+            maxValue: 8,
+            increment: 0.02 // seconds
+        },
+        y: {
+            format: {
+                image: {
+                    yPosition: 20,
+                    originX: 0.3,
+                    originY: 0.5
+                },
+                labels: {
+                    font: 'Calibri',
+                    tint: '#FFFFFF', //white
+                    size: 12,
+                    xPosition: 742,
+                    align: 'right'
+                }
+            },
+            Q: {
+                quantity: 'charge',
+                unit: 'microcoulombs',
+                minValue: 0,
+                maxValue: 3.5,
+                axisImage: 'axisLabelQ-img'
+            },
+            I: {
+                quantity: 'current',
+                unit: 'microamperes',
+                minValue: 0,
+                maxValue: 1.75,
+                axisImage: 'axisLabelI-img'
+            },
+            V: {
+                quantity: 'voltage',
+                unit: 'volts',
+                minValue: 0,
+                maxValue: 1.75,
+                axisImage: 'axisLabelV-img'
+            }
+        }
+    },
+    plot: {
+        lineThickness: 4,
+        lineTint: '0xFFA218' //orange
+    },
+    dotRadius: 8, // for the valuesDisplay below
+    dotFillTint: '0xFFA218',
+    valuesDisplay: {
+        line: {
+            thickness: 2,
+            tint: '0xFFA218' //orange
+        },
+        text: {
+            spacing: 30, // pixels from graph axis
+            font: 'Calibri',
+            size: 12,
+            tint: '#FFA218', //orange
+            xAxis: {
+                copy: null, // will be something like 1.23 (rounded to 2 d.p. - ideally always 2 d.p. e.g. 1.20)
+                align: 'center'
+            },
+            yAxis: {
+                copy: null, // will be the graph value e.g. 0.42 (rounded to 2 d.p. - ideally always 2 d.p. e.g. 1.20)
+                align: 'right'
+            }
+        }
+    },
+    RCMarker: {
+        marker: {
+            radius: 6,
+            fillTint: '0xF650DA' // pink
+        },
+        line: {
+            thickness: 2,
+            tint: '0xF650DA' // pink
+        },
+        text: {
+            spacing: 30, // pixels from graph axis
+            font: 'Calibri',
+            size: 12,
+            tint: '#F650DA', // pink
+            xAxis: {
+                copy: 'RC = ', // will be something like RC = 1.23 (rounded to 2 d.p. - ideally always 2 d.p. e.g. 1.20)
+                align: 'center'
+            },
+            yAxis: {
+                copy: null, // will be something the graph value e.g. 0.42 (rounded to 2 d.p. - ideally always 2 d.p. e.g. 1.20)
+                align: 'right'
+            }
+        }
+    }
+}
+
+const switchConfig = {
+    contact: {
+        leftEnd: {
+            x: 630,
+            y: 299
+        },
+        rightEnd: {
+            discharging: {
+                x: 669,
+                y: 288
+            },
+            charging: {
+                x: 669,
+                y: 317
+            }
+        },
+        format: {
+            lineThickness: 4,
+            lineTint: '0xFFFFFF' //white
+        }
+    },
+    hitArea: {
+        bottomLeftX: 624,
+        bottomLeftY: 319,
+        width: 40,
+        height: 40
+    }
+}
+
+let slideSwitchConfig = {
+    scale: 1,
+    x: 1118,
+    originX: 0,
+    originY: 0.5,
+    xNudge: 0,
+    yNudge: 0,
+    font: 'Calibri',
+    textSize: 16,
+    textTint: '#FFFFFF',
+    textPositionLeftOfSwitch: 10,
+    showRC: {
+        y: 135,
+        words: 'show RC',
+        startState: 'off'
+    },
+    showValues: {
+        y: 164,
+        words: 'show values',
+        startState: 'off'
+    }
+};
+
+const timeManagerConfig = {
+    ticksPerIncrement: 2 // Number of Phaser clock ticks per graphConfig.axes.x.increment
+}
+
+let values = {
+    C: sliderConfig.sliders.CHandle.startVal,
+    R: sliderConfig.sliders.RHandle.startVal,
+    t: sliderConfig.sliders.tHandle.startVal, 
+    Q0: null,
+    Q: null,
+    I0: null,
+    I: null,
+    V0: 1.5,
+    V: null
+};
+
+const chargesConfig = {
+    positive: {
+        originX: 0,
+        originY: 0.5
+    },
+    negative: {
+        originX: 1,
+        originY: 0.5        
+    },
+    platesMultiplier: 5,
+    wires: {
+        originX: 0.5,
+        originY: 0.5,
+        travel: 20,
+        maxCharge: sliderConfig.sliders.CHandle.maxVal * values.V0,
+        charge1: { x: 494, y: 427, charging: 'right', discharging: 'origin' },
+        charge2: { x: 590, y: 427, charging: 'right', discharging: 'origin' },
+        charge3: { x: 674, y: 397, charging: 'up', discharging: 'origin' },
+        charge4: { x: 631, y: 281, charging: 'left', discharging: 'right' },
+        charge5: { x: 505, y: 285, charging: 'left', discharging: 'right' },
+        charge6: { x: 471, y: 322, charging: 'down', discharging: 'origin' },
+        charge7: { x: 471, y: 200, charging: 'origin', discharging: 'down' },
+        charge8: { x: 536, y: 177, charging: 'origin', discharging: 'left' },
+        charge9: { x: 588, y: 177, charging: 'origin', discharging: 'left' },
+        charge10: { x: 652, y: 177, charging: 'origin', discharging: 'left' },
+        charge11: { x: 674, y: 255, charging: 'origin', discharging: 'up' }
+    }
+};
+
+let radioButtonGroups = { // labels for radio buttons are in background image so ref value to make debugging easier
+    scale: 1,
+    x: 1148,
+    originX: 0.5,
+    originY: 0.5,
+    verticalSpacing: 37,
+    group1: {
+        name: 'graphChoice',
+        startY: 22,
+        selected: 'button1',
+        button1: {
+            ref: 'charge'
+        },
+        button2: {
+            ref: 'current'
+        },
+        button3: {
+            ref: 'voltage'
+        }        
+    }
+};
+
+const uiConfig = {
+    playControls: {
+        depth: 500,
+        playPause: {
+            x: 505,
+            y: 74,
+            originX: 0.5,
+            originY: 0.5            
+        }
+    }
+}
+
+const valueKeysMapping = {
+    'CHandle': 'C',
+    'RHandle': 'R',
+    'tHandle': 't'
+};
+
+let switchStatus = 'charging'; // options are 'charging' and 'discharging'
+
+let playing = true;
+let dischargeFinished = false;
+let showValues = false;
+let showRC = false;
+
+let graphType = 'charge'; // options are 'charge', 'current', 'voltage'
+
+let game = new Phaser.Game(config);
+let sliders = [];
+let timeSlider; // used to address the timeslider and move its handle
+let radioGroup;
+
+// Initialize global arrays for storing data based on graph type
+let chargeData = [];
+let currentData = [];
+let voltageData = [];
+
+let ui;
+let timeManager;
+let graph;
+let visualization;
+let calculations;
+let charges;
+let chargeDischargeSwitch;
+
+let background;
+
+class Test {
+    constructor(scene, x, y) {
+        this.scene = scene;
+        this.x = x;
+        this.y = y;
+        this.handle = null;
+    }
+
+    create() {
+
+        // Create the handle image with 50% alpha
+        this.handle = this.scene.add.image(this.x, this.y, 'handle');
+        this.handle.setAlpha(0.5);
+        this.handle.setScale(0.2); // Scale the handle to 20%
+        this.handle.setInteractive({ useHandCursor: true });
+
+        // Make the handle draggable
+        this.scene.input.setDraggable(this.handle);
+
+        // Output the coordinates to the console when dragging
+        this.handle.on('drag', (pointer, dragX, dragY) => {
+            this.handle.setPosition(dragX, dragY);
+            console.log(`x: ${dragX}, y: ${dragY}`);
+        });
+    }
+}
+
+class TimeManager {
+    constructor() {
+        this.currentTime = 0;
+        this.currentIndex = 0;
+        this.ticksPerIncrement = timeManagerConfig.ticksPerIncrement;
+        this.currentTick = 1;
+    }
+
+    handleSliderDrag() {
+        this.getTimeAndIndex();
+    }
+
+    getTimeAndIndex() {
+        // Calculate the index based on slider position
+        const increment = graphConfig.axes.x.increment;
+        const minTime = graphConfig.axes.x.minValue;
+
+        // Use the slider time value to determine the closest index
+        const approximateIndex = Math.round((values.t - minTime) / increment);
+
+        // Ensure index stays within bounds
+        const maxIndex = chargeData.length - 1;
+        this.currentIndex = Math.min(Math.max(approximateIndex, 0), maxIndex);
+
+        // Use the time from the chargeData array at this index as the current time
+        this.currentTime = chargeData[this.currentIndex].time;
+
+        return { time: this.currentTime, index: this.currentIndex };
+    }
+
+    checkIncrement() {
+        this.currentTick++;
+        if (this.currentTick >= this.ticksPerIncrement) {
+            if (this.currentIndex < chargeData.length - 1) {
+                this.currentIndex++;
+                this.currentTime = chargeData[this.currentIndex].time; // Update currentTime based on currentIndex
+                this.currentTick = 0;
+                return true;
+            } else {
+                dischargeFinished = true;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    reset() {
+        this.currentIndex = 0;
+        this.currentTick = 0;
+        this.currentTime = 0;
+    }
+}
+
+class RadioButtonGroup {
+    constructor(scene, config, groupKey) {
+        this.scene = scene;
+        this.config = config;
+        this.group = config[groupKey];
+        this.buttons = {}; // Store button images for easy access during selection
+    }
+
+    create() {
+        let yPos = this.group.startY;
+
+        // Explicitly loop only through the buttons in the group
+        const buttonKeys = Object.keys(this.group).filter(key => key.startsWith('button'));
+
+        buttonKeys.forEach(buttonKey => {
+            const buttonConfig = this.group[buttonKey];
+            const isSelected = (buttonKey === this.group.selected);
+
+            // Create the button image
+            const buttonImage = this.scene.add.image(
+                this.config.x,
+                yPos,
+                isSelected ? 'radioButtonSelected-img' : 'radioButtonUnselected-img'
+            )
+            .setScale(this.config.scale)
+            .setOrigin(this.config.originX, this.config.originY)
+            .setInteractive({ cursor: 'pointer' });
+
+            // Store the button image in the buttons object
+            this.buttons[buttonKey] = buttonImage;
+
+            // Add click event listener
+            buttonImage.on('pointerdown', () => {
+                this.selectButton(buttonKey);
+            });
+
+            yPos += this.config.verticalSpacing;
+        });
+    }
+
+    selectButton(buttonKey) {
+
+        // Update the selected button
+        this.group.selected = buttonKey;
+
+        // Set all buttons to unselected state
+        for (const key in this.buttons) {
+            this.buttons[key].setTexture('radioButtonUnselected-img');
+        }
+
+        // Set the selected button to selected state
+        this.buttons[buttonKey].setTexture('radioButtonSelected-img');
+
+        graphType = this.group[buttonKey].ref;
+        visualization.changeVisualization();
+    }
+}
+
+class UI {
+    constructor(scene) {
+        this.scene = scene;
+        this.config = uiConfig;
+        this.slideSwitches = {};
+        this.slideSwitchLabels = {}; // Store switch label texts
+        this.playPauseButton = null; // To store the play/pause button
+    }
+
+    create() {
+        // Create play/pause and reset buttons
+        this.createPlayPauseButton();
+        this.updatePlayPauseButton();
+        this.createSlideSwitch('showRC', slideSwitchConfig.showRC);
+        this.createSlideSwitch('showValues', slideSwitchConfig.showValues);
+    }
+
+    createPlayPauseButton() {
+        // Initially create the play button
+        this.playPauseButton = this.scene.add.image(this.config.playControls.playPause.x, this.config.playControls.playPause.y, 'playBtn-img');
+        this.playPauseButton.setOrigin(this.config.playControls.playPause.originX, this.config.playControls.playPause.originY);
+        this.playPauseButton.setInteractive({ useHandCursor: true });
+        this.playPauseButton.setDepth(this.config.playControls.depth);
+
+        this.playPauseButton.on('pointerdown', () => {
+            if (!playing) {
+                this.play();  // Switch to play
+                playing = true;
+            } else {
+                this.pause();  // Switch to pause
+                playing = false;
+            }
+        });
+    }
+
+    play() {
+        playing = true;
+        this.updatePlayPauseButton();  // Update the button to show the pause image
+        // Add code here to start/resume the simulation if needed
+    }
+
+    pause() {
+        playing = false;
+        this.updatePlayPauseButton();  // Update the button to show the play image
+        // Add code here to pause the simulation if needed
+    }
+
+    updatePlayPauseButton() {
+        // Change the button image based on the current play status
+        if (playing) {
+            this.playPauseButton.setTexture('pauseBtn-img');
+        } else {
+            this.playPauseButton.setTexture('playBtn-img');
+        }
+    }
+
+    createSlideSwitch(key, config) {
+        // Determine initial state image
+        const initialState = config.startState === 'on' ? 'switchOn-img' : 'switchOff-img';
+        
+        // Create the switch image with hand cursor
+        const switchImage = this.scene.add.image(slideSwitchConfig.x, config.y, initialState)
+            .setScale(slideSwitchConfig.scale)
+            .setOrigin(slideSwitchConfig.originX, slideSwitchConfig.originY)
+            .setInteractive({ cursor: 'pointer' });
+
+        // Store the switch state and image
+        this.slideSwitches[key] = {
+            state: config.startState,
+            image: switchImage
+        };
+
+        // Add the toggle functionality
+        switchImage.on('pointerdown', () => {
+            this.toggleSlideSwitch(key);
+        });
+
+        // Add the label text for the switch
+        const switchLabel = this.scene.add.text(
+            slideSwitchConfig.x - slideSwitchConfig.textPositionLeftOfSwitch,
+            config.y,
+            config.words,
+            {
+                font: `${slideSwitchConfig.textSize}px ${slideSwitchConfig.font}`,
+                fill: `${slideSwitchConfig.textTint}`,
+            }
+        ).setOrigin(1, 0.5); // Align text to the left of the switch
+
+        this.slideSwitchLabels[key] = switchLabel; // Store label text for toggling visibility
+    }
+
+    toggleSlideSwitch(key) {
+        const switchData = this.slideSwitches[key];
+
+        // Toggle the state
+        switchData.state = switchData.state === 'on' ? 'off' : 'on';
+
+        // Update the switch image
+        const newStateImage = switchData.state === 'on' ? 'switchOn-img' : 'switchOff-img';
+        switchData.image.setTexture(newStateImage);
+
+        if (key === 'showValues') {
+            showValues = !showValues;
+            visualization.toggleShowValues();
+        } else if (key === 'showRC') {
+            showRC = !showRC;
+            visualization.toggleShowRC();
+        }
+    }
+}
+
+class Graph {
+    constructor(scene) {
+        this.scene = scene;
+        this.dotGraphics = this.scene.add.graphics(); // For drawing the dot
+        this.dotRadius = graphConfig.dotRadius;
+        this.dotFillTint = graphConfig.dotFillTint;
+
+        // RC marker and line graphics
+        this.RCMarkerGraphics = this.scene.add.graphics();
+        this.RCLineGraphics = this.scene.add.graphics();
+
+        // Placeholders for RC marker text labels
+        this.RCTextXAxis = null;  // Label for x-axis (RC time constant)
+        this.RCTextYAxis = null;  // Label for y-axis (graph value at RC)
+
+        this.RCIndex = null;
+
+        // Graphics for showValues lines and text annotations
+        this.valuesLineGraphics = this.scene.add.graphics();
+        this.valuesTextXAxis = null; // Label for x-axis (time value at dot)
+        this.valuesTextYAxis = null; // Label for y-axis (graph value at dot)
+
+        // Track current dot position and index for showValues
+        this.currentDotIndex = null;
+        this.currentDotX = null;
+        this.currentDotY = null;
+
+    }
+
+    create() {
+        this.formatYAxis();
+        calculations.populateArray();
+        this.plotCurve();
+        if (showRC) this.drawRCMarker();
+        if (showValues) this.drawValuesDisplay();
+    }
+
+    updateOnSliderDrag() {
+        calculations.populateArray();
+        this.plotCurve();
+        if (showRC) this.drawRCMarker();
+        if (showValues) this.drawValuesDisplay();      
+    }
+
+    updateOnChangeGraph() {
+        this.formatYAxis();
+        calculations.populateArray();
+        this.plotCurve();
+        if (showRC) this.drawRCMarker();
+        if (showValues) this.drawValuesDisplay();
+    }
+
+    formatYAxis() {
+        // Clear any existing y-axis labels or images, if needed
+        if (this.yAxisImage) this.yAxisImage.destroy();
+        if (this.yAxisLabels) this.yAxisLabels.forEach(label => label.destroy());
+
+        // Choose y-axis settings based on the selected graph type
+        const yAxisConfig = (() => {
+            switch (graphType) {
+                case 'charge': return graphConfig.axes.y.Q;
+                case 'current': return graphConfig.axes.y.I;
+                case 'voltage': return graphConfig.axes.y.V;
+                default: 
+                    console.warn(`Unknown graph type: ${graphType}`);
+                    return null;
+            }
+        })();
+
+        const { minValue, maxValue, axisImage } = yAxisConfig;
+        const { labels, image } = graphConfig.axes.y.format;
+        const { squaresUp } = graphConfig.area;
+        this.yAxisLabels = [];
+
+        // Add y-axis label image if defined
+        if (axisImage) {
+            this.yAxisImage = this.scene.add.image(graphConfig.area.topLeft.x, image.yPosition, axisImage)
+                .setOrigin(image.originX, image.originY);
+        }
+
+        // Set rounding precision based on graphType
+        const roundingPrecision = (graphType === 'charge') ? -1 : -2; // -1 for 1 decimal place, -2 for 2 decimal places
+
+        // Calculate label interval based on the number of divisions (squares) up the y-axis
+        const labelInterval = (maxValue - minValue) / squaresUp;
+
+        // Create y-axis labels from minValue to maxValue
+        for (let i = 0; i <= squaresUp; i++) {
+            const labelValue = Phaser.Math.RoundTo(minValue + i * labelInterval, roundingPrecision); // Apply precision
+            const yPos = Phaser.Math.Interpolation.Linear(
+                [graphConfig.area.bottomRight.y, graphConfig.area.topLeft.y],
+                i / squaresUp
+            );
+
+            const label = this.scene.add.text(
+                labels.xPosition,
+                yPos,
+                labelValue.toString(),
+                { font: `${labels.size}px ${labels.font}`, color: labels.tint, align: labels.align }
+            ).setOrigin(1, 0.5); // Align right
+
+            this.yAxisLabels.push(label);
+        }
+    }
+
+    plotCurve() {
+        // Clear any previous curve graphics
+        if (this.curveGraphics) {
+            this.curveGraphics.clear();
+        } else {
+            this.curveGraphics = this.scene.add.graphics();
+        }
+
+        // Set line style for the curve
+        const { lineThickness, lineTint } = graphConfig.plot;
+        this.curveGraphics.lineStyle(lineThickness, lineTint);
+
+        // Determine which array to plot based on graphType
+        let dataArray;
+        switch (graphType) {
+            case 'charge':
+                dataArray = chargeData;
+                break;
+            case 'current':
+                dataArray = currentData;
+                break;
+            case 'voltage':
+                dataArray = voltageData;
+                break;
+            default:
+                console.warn(`Unknown graph type: ${graphType}`);
+                return;
+        }
+
+        // Calculate RC value and initialize variables to track the closest point
+        const RCValue = values.R * values.C;
+        let minDifference = Infinity; // Initialize with a large value
+
+        // Get x-axis and y-axis configuration details
+        const { minValue: xMin, maxValue: xMax } = graphConfig.axes.x;
+        const { minValue: yMin, maxValue: yMax } = (() => {
+            switch (graphType) {
+                case 'charge': return graphConfig.axes.y.Q;
+                case 'current': return graphConfig.axes.y.I;
+                case 'voltage': return graphConfig.axes.y.V;
+            }
+        })();
+        const { topLeft, bottomRight } = graphConfig.area;
+
+        // Convert data points to pixel coordinates and plot them
+        this.curveGraphics.beginPath();
+        dataArray.forEach((point, index) => {
+            // Calculate pixel x based on time
+            const x = Phaser.Math.Interpolation.Linear(
+                [topLeft.x, bottomRight.x],
+                (point.time - xMin) / (xMax - xMin)
+            );
+
+            // Calculate pixel y based on value
+            const y = Phaser.Math.Interpolation.Linear(
+                [bottomRight.y, topLeft.y],
+                (point.value - yMin) / (yMax - yMin)
+            );
+
+            // Store pixel coordinates in the data point
+            point.x = x;
+            point.y = y;
+
+            // Check if this is the closest point to RC and update RCIndex if so
+            const timeDifference = Math.abs(point.time - RCValue);
+            if (timeDifference < minDifference) {
+                minDifference = timeDifference;
+                this.RCIndex = index; // Store the closest index for RC
+            }
+
+            // Move to the first point or draw line to subsequent points
+            if (index === 0) {
+                this.curveGraphics.moveTo(x, y);
+            } else {
+                this.curveGraphics.lineTo(x, y);
+            }
+        });
+        this.curveGraphics.strokePath(); // Draw the curve
+    }
+
+    drawDot() {
+        // Clear previous dot graphics to ensure only one dot is visible at any time
+        this.dotGraphics.clear();
+
+        // Get the appropriate data array based on the current graph type
+        let dataArray;
+        switch (graphType) {
+            case 'charge':
+                dataArray = chargeData;
+                break;
+            case 'current':
+                dataArray = currentData;
+                break;
+            case 'voltage':
+                dataArray = voltageData;
+                break;
+            default:
+                console.warn(`Unknown graph type: ${graphType}`);
+                return;
+        }
+
+        // Retrieve the current index and ensure it's within bounds
+        const { currentIndex } = timeManager;
+        if (currentIndex >= dataArray.length) return;
+
+        // Get the pixel coordinates for the dot based on the current data point
+        const point = dataArray[currentIndex];
+        const x = point.x;
+        const y = point.y;
+
+        // Draw the dot at the calculated position
+        this.dotGraphics.fillStyle(this.dotFillTint);
+        this.dotGraphics.fillCircle(x, y, this.dotRadius);
+
+        // Store the index and coordinates of the current dot for showValues functionality
+        this.currentDotIndex = currentIndex;
+        this.currentDotX = x;
+        this.currentDotY = y;
+
+        if (showValues) {
+            this.drawValuesDisplay();
+        } else {
+            this.clearValuesDisplay();
+        }
+
+    }
+
+    drawRCMarker() {
+        // Clear previous RC marker and lines
+        this.clearRCMarker();
+
+        // Check if RCIndex has been set
+        if (this.RCIndex === null) {
+            console.warn("RCIndex is not set, cannot draw RC marker");
+            return;
+        }
+
+        // Get the appropriate data array based on the current graph type
+        let dataArray;
+        switch (graphType) {
+            case 'charge':
+                dataArray = chargeData;
+                break;
+            case 'current':
+                dataArray = currentData;
+                break;
+            case 'voltage':
+                dataArray = voltageData;
+                break;
+            default:
+                console.warn(`Unknown graph type: ${graphType}`);
+                return;
+        }
+
+        // Ensure RCIndex is within bounds
+        if (this.RCIndex >= dataArray.length) {
+            console.warn("RCIndex is out of bounds");
+            return;
+        }
+
+        // Retrieve the RC point coordinates
+        const point = dataArray[this.RCIndex];
+        const x = point.x;
+        const y = point.y;
+        const RCValue = Phaser.Math.RoundTo(values.R * values.C, -2);  // Rounded RC value
+
+        // Draw the RC marker
+        this.RCMarkerGraphics.fillStyle(graphConfig.RCMarker.marker.fillTint);
+        this.RCMarkerGraphics.fillCircle(x, y, graphConfig.RCMarker.marker.radius);
+
+        // Draw the vertical line to the x-axis
+        this.RCMarkerGraphics.lineStyle(graphConfig.RCMarker.line.thickness, graphConfig.RCMarker.line.tint);
+        this.RCMarkerGraphics.beginPath();
+        this.RCMarkerGraphics.moveTo(x, y);
+        this.RCMarkerGraphics.lineTo(x, graphConfig.area.bottomRight.y);
+        this.RCMarkerGraphics.strokePath();
+
+        // Draw the horizontal line to the y-axis
+        this.RCMarkerGraphics.beginPath();
+        this.RCMarkerGraphics.moveTo(x, y);
+        this.RCMarkerGraphics.lineTo(graphConfig.area.topLeft.x, y);
+        this.RCMarkerGraphics.strokePath();
+
+        // Add annotation for x-axis intercept (RC time constant)
+        const xLabel = graphConfig.RCMarker.text.xAxis.copy + RCValue.toFixed(2);
+        if (this.RCTextXAxis) this.RCTextXAxis.destroy();
+        this.RCTextXAxis = this.scene.add.text(
+            x, graphConfig.area.bottomRight.y + graphConfig.RCMarker.text.spacing,
+            xLabel,
+            { font: `${graphConfig.RCMarker.text.size}px ${graphConfig.RCMarker.text.font}`, fill: graphConfig.RCMarker.text.tint }
+        ).setOrigin(0.5, 0); // Centered below the x-axis intercept
+
+        // Add annotation for y-axis intercept (value at RC for current graph type)
+        const yLabel = point.value.toFixed(2);
+        if (this.RCTextYAxis) this.RCTextYAxis.destroy();
+        this.RCTextYAxis = this.scene.add.text(
+            graphConfig.area.topLeft.x - graphConfig.RCMarker.text.spacing, y,
+            yLabel,
+            { font: `${graphConfig.RCMarker.text.size}px ${graphConfig.RCMarker.text.font}`, fill: graphConfig.RCMarker.text.tint }
+        ).setOrigin(1, 0.5); // Aligned to the right of the y-axis intercept
+    }
+
+    clearRCMarker() {
+        // Clear both marker and line graphics
+        this.RCMarkerGraphics.clear();
+
+        // Destroy the text elements if they exist
+        if (this.RCTextXAxis) {
+            this.RCTextXAxis.destroy();
+            this.RCTextXAxis = null;
+        }
+        if (this.RCTextYAxis) {
+            this.RCTextYAxis.destroy();
+            this.RCTextYAxis = null;
+        }
+    }
+
+    drawValuesDisplay() {
+        // Clear any previous values display
+        this.clearValuesDisplay();
+
+        // Ensure we have a valid dot position
+        if (this.currentDotIndex === null || this.currentDotX === null || this.currentDotY === null) {
+            console.warn("No current dot position available for values display");
+            return;
+        }
+
+        // Select the appropriate data array based on the current graph type
+        let dataArray;
+        switch (graphType) {
+            case 'charge':
+                dataArray = chargeData;
+                break;
+            case 'current':
+                dataArray = currentData;
+                break;
+            case 'voltage':
+                dataArray = voltageData;
+                break;
+            default:
+                console.warn(`Unknown graph type: ${graphType}`);
+                return;
+        }
+
+        // Retrieve the time and value at the current dot index from the selected data array
+        const timeLabel = dataArray[this.currentDotIndex].time.toFixed(2);
+        const valueLabel = dataArray[this.currentDotIndex].value.toFixed(2);
+
+        // Draw vertical line to the x-axis
+        this.valuesLineGraphics.lineStyle(graphConfig.valuesDisplay.line.thickness, graphConfig.valuesDisplay.line.tint);
+        this.valuesLineGraphics.beginPath();
+        this.valuesLineGraphics.moveTo(this.currentDotX, this.currentDotY);
+        this.valuesLineGraphics.lineTo(this.currentDotX, graphConfig.area.bottomRight.y);
+        this.valuesLineGraphics.strokePath();
+
+        // Draw horizontal line to the y-axis
+        this.valuesLineGraphics.beginPath();
+        this.valuesLineGraphics.moveTo(this.currentDotX, this.currentDotY);
+        this.valuesLineGraphics.lineTo(graphConfig.area.topLeft.x, this.currentDotY);
+        this.valuesLineGraphics.strokePath();
+
+        // Add annotation for x-axis intercept (time at current dot)
+        if (this.valuesTextXAxis) this.valuesTextXAxis.destroy();
+        this.valuesTextXAxis = this.scene.add.text(
+            this.currentDotX,
+            graphConfig.area.bottomRight.y + graphConfig.valuesDisplay.text.spacing,
+            timeLabel,
+            { font: `${graphConfig.valuesDisplay.text.size}px ${graphConfig.valuesDisplay.text.font}`, fill: graphConfig.valuesDisplay.text.tint }
+        ).setOrigin(0.5, 0); // Centered below the x-axis intercept
+
+        // Add annotation for y-axis intercept (graph value at current dot)
+        if (this.valuesTextYAxis) this.valuesTextYAxis.destroy();
+        this.valuesTextYAxis = this.scene.add.text(
+            graphConfig.area.topLeft.x - graphConfig.valuesDisplay.text.spacing,
+            this.currentDotY,
+            valueLabel,
+            { font: `${graphConfig.valuesDisplay.text.size}px ${graphConfig.valuesDisplay.text.font}`, fill: graphConfig.valuesDisplay.text.tint }
+        ).setOrigin(1, 0.5); // Aligned to the right of the y-axis intercept
+    }
+
+    clearValuesDisplay() {
+        // Clear the line graphics
+        this.valuesLineGraphics.clear();
+
+        // Destroy the text labels if they exist
+        if (this.valuesTextXAxis) {
+            this.valuesTextXAxis.destroy();
+            this.valuesTextXAxis = null;
+        }
+        if (this.valuesTextYAxis) {
+            this.valuesTextYAxis.destroy();
+            this.valuesTextYAxis = null;
+        }
+    }
+}
+
+class Switch {
+    constructor(scene) {
+        this.scene = scene;
+        this.contactBar = null; // Graphics object for the switch contact
+    }
+
+    create() {
+        // Draw the initial switch state based on `switchStatus`
+        this.drawContact();
+
+        // Set up the interactive area for the switch toggle
+        this.createHitArea();
+    }
+
+    drawContact() {
+        const { lineThickness, lineTint } = switchConfig.contact.format;
+        const { leftEnd, rightEnd } = switchConfig.contact;
+
+        // Clear previous drawing if it exists
+        if (this.contactBar) {
+            this.contactBar.clear();
+        } else {
+            // Create graphics object if not already present
+            this.contactBar = this.scene.add.graphics();
+        }
+
+        // Set line style and draw contact bar based on `switchStatus`
+        this.contactBar.lineStyle(lineThickness, lineTint);
+        this.contactBar.beginPath();
+
+        // Determine position based on charging or discharging state
+        const rightPosition = switchStatus === 'charging' ? rightEnd.charging : rightEnd.discharging;
+        this.contactBar.moveTo(leftEnd.x, leftEnd.y);
+        this.contactBar.lineTo(rightPosition.x, rightPosition.y);
+        this.contactBar.strokePath();
+    }
+
+    createHitArea() {
+        const { bottomLeftX, bottomLeftY, width, height } = switchConfig.hitArea;
+
+        // Create an invisible rectangle for the interactive hit area
+        const hitArea = this.scene.add.rectangle(
+            bottomLeftX + width / 2,
+            bottomLeftY - height / 2,
+            width,
+            height,
+            0x000000,
+            0 // Invisible
+        ).setInteractive({ useHandCursor: true });
+
+        // Toggle switch state when the hit area is clicked
+        hitArea.on('pointerdown', () => {
+            this.toggleSwitch();
+        });
+    }
+
+    toggleSwitch() {
+        // Toggle between charging and discharging
+        switchStatus = switchStatus === 'charging' ? 'discharging' : 'charging';
+        
+        // Redraw the switch contact based on the new state
+        this.drawContact();
+        if (switchStatus === 'charging') {
+            visualization.chargeCapacitor();
+            timeSlider.setInactive();
+        } else {
+            timeSlider.setActive();
+        }
+    }
+}
+
+class Visualization {
+    constructor(scene) {
+        this.scene = scene;
+        this.leftPlate = null;
+        this.rightPlate = null;
+        this.currentBackground = null;
+    }
+
+    create() {
+        this.createPlates();
+        this.updateBackground();
+        charges.calculateCharge();
+        charges.placeChargesOnPlate();
+        graph.drawDot();
+        charges.createNegativeChargesOnWires();
+        charges.updateNegativeChargesOnWires();
+        timeSlider.setInactive();
+    }
+
+    changeVisualization() {
+        this.updateBackground();
+        graph.updateOnChangeGraph();
+        graph.drawDot();
+        charges.updateNegativeChargesOnWires();
+    }
+
+    updateBackground() {
+
+        // Remove the previous background if it exists
+        if (this.currentBackground) {
+            this.currentBackground.destroy();
+        }
+
+        // Choose the new background based on the graphType
+        let backgroundImageKey;
+        switch (graphType) {
+            case 'charge':
+                backgroundImageKey = 'qEqualsQ0eToTheMinus1OverRC-bg';
+                break;
+            case 'current':
+                backgroundImageKey = 'iEqualsI0eToTheMinus1OverRC-bg';
+                break;
+            case 'voltage':
+                backgroundImageKey = 'vEqualsV0eToTheMinus1OverRC-bg';
+                break;
+            default:
+                console.warn(`Unknown graph type: ${graphType}`);
+                return;
+        }
+
+        // Add the new background image
+        this.currentBackground = this.scene.add.image(bgConfig.x, bgConfig.y, backgroundImageKey)
+            .setOrigin(bgConfig.originX, bgConfig.originY)
+            .setScale(bgConfig.scale)
+            .setDepth(-1);
+
+    }
+
+    // Method to create the plates
+    createPlates() {
+        const { leftX, rightX, y } = platesConfig.position;
+        const { minHeight, maxHeight } = platesConfig.size;
+        const { lineThickness, lineTint } = platesConfig.format;
+
+        // Create graphics objects for the plates if not already created
+        if (!this.leftPlate) {
+            this.leftPlate = this.scene.add.graphics();
+        }
+
+        if (!this.rightPlate) {
+            this.rightPlate = this.scene.add.graphics();
+        }
+
+        // Draw the initial plates based on the starting value of capacitance (values.C)
+        this.updatePlates();
+    }
+
+    // Method to update the plates based on the capacitance value
+    updatePlates() {
+        const { leftX, rightX, y } = platesConfig.position;
+        const { minHeight, maxHeight } = platesConfig.size;
+        const { lineThickness, lineTint } = platesConfig.format;
+
+        // Clear the previous plate drawings
+        this.leftPlate.clear();
+        this.rightPlate.clear();
+
+        // Calculate the plate height based on capacitance (values.C)
+        const plateHeight = Phaser.Math.Interpolation.Linear([minHeight, maxHeight], (values.C - sliderConfig.sliders.CHandle.minVal) / (sliderConfig.sliders.CHandle.maxVal - sliderConfig.sliders.CHandle.minVal));
+
+        // Set line style for the plates
+        this.leftPlate.lineStyle(lineThickness, lineTint);
+        this.rightPlate.lineStyle(lineThickness, lineTint);
+
+        // Draw the left plate
+        this.leftPlate.beginPath();
+        this.leftPlate.moveTo(leftX, y - plateHeight / 2);
+        this.leftPlate.lineTo(leftX, y + plateHeight / 2);
+        this.leftPlate.strokePath();
+
+        // Draw the right plate
+        this.rightPlate.beginPath();
+        this.rightPlate.moveTo(rightX, y - plateHeight / 2);
+        this.rightPlate.lineTo(rightX, y + plateHeight / 2);
+        this.rightPlate.strokePath();
+    }
+
+    // Call this when the slider is dragged to update the plates
+    updateOnSliderDrag(sliderType) {
+        dischargeFinished = false;
+        
+        if (sliderType === 'C') {
+            this.updatePlates();
+        }
+
+        if (sliderType === 'C' || sliderType === 'R') {
+            graph.updateOnSliderDrag();
+        }
+
+        if (sliderType === 't') {
+            timeManager.handleSliderDrag();
+        }
+
+        charges.calculateCharge();
+        charges.placeChargesOnPlate();
+        graph.drawDot();
+        charges.updateNegativeChargesOnWires();
+    }
+
+    updateOnTick() {
+        if (timeManager.checkIncrement()) {
+            charges.calculateCharge();
+            charges.placeChargesOnPlate();
+            timeSlider.setValue(timeManager.currentTime);
+            graph.drawDot();
+            charges.updateNegativeChargesOnWires();
+        }
+    }
+
+    chargeCapacitor() {
+        timeManager.reset();
+        dischargeFinished = false;
+        charges.calculateCharge();
+        charges.placeChargesOnPlate();
+
+        timeSlider.setValue(0);
+        graph.drawDot();
+        charges.updateNegativeChargesOnWires();
+    }
+
+    toggleShowRC() {
+        if (showRC) {
+            graph.drawRCMarker();
+        } else {
+            graph.clearRCMarker();
+        }
+    }
+
+    toggleShowValues() {
+        if (showValues) {
+            graph.drawValuesDisplay();
+        } else {
+            graph.clearValuesDisplay();
+        }
+    }
+}
+
+class Calculations {
+    populateArray() {
+        // Clear all relevant global arrays
+        chargeData = [];
+        currentData = [];
+        voltageData = [];
+
+        // Set initial values and calculate the time constant τ = R * C
+        const { V0, C, R } = values;
+        const tau = R * C;
+        let time = graphConfig.axes.x.minValue;
+        const increment = graphConfig.axes.x.increment;
+
+        // Populate arrays for charge, current, and voltage based on the discharging scenario
+        while (time <= graphConfig.axes.x.maxValue) {
+            // Calculate the common exponential term
+            const expFactor = Math.exp(-time / tau);
+
+            // Calculate values for charge, current, and voltage using the expFactor
+            const chargeValue = V0 * C * expFactor;
+            const currentValue = (V0 / R) * expFactor;
+            const voltageValue = V0 * expFactor;
+
+            // Push values into the respective arrays
+            chargeData.push({ time, value: chargeValue });
+            currentData.push({ time, value: currentValue });
+            voltageData.push({ time, value: voltageValue });
+
+            // Increment time for the next data point
+            time += increment;
+        }
+    }
+}
+
+class Charges {
+    constructor(scene) {
+        this.scene = scene;
+        this.positiveCharges = [];
+        this.negativeCharges = [];
+        this.wireCharges = [];
+    }
+
+    calculateCharge() {
+        // Retrieve the current index from the TimeManager
+        let index = timeManager.currentIndex;
+
+        // Get the charge value at that index from chargeData
+        let chargeEntry = chargeData[index];
+
+        // Update values.Q with the charge value (round if needed)
+        values.Q = Math.round(chargeEntry.value * chargesConfig.platesMultiplier);
+    }
+
+    clearCharges() {
+        // Remove the existing charges from the scene
+        this.positiveCharges.forEach(charge => charge.destroy());
+        this.negativeCharges.forEach(charge => charge.destroy());
+
+        // Clear the arrays
+        this.positiveCharges = [];
+        this.negativeCharges = [];
+    }
+
+    placeChargesOnPlate() {
+        // Clear any existing charges
+        this.clearCharges();
+
+        // Get the plate configuration
+        const { leftX, rightX, y } = platesConfig.position;
+        const { minHeight, maxHeight } = platesConfig.size;
+
+        // Calculate plate height based on capacitance (similar to how it's done for the plates)
+        const plateHeight = Phaser.Math.Interpolation.Linear([minHeight, maxHeight], (values.C - sliderConfig.sliders.CHandle.minVal) / (sliderConfig.sliders.CHandle.maxVal - sliderConfig.sliders.CHandle.minVal));
+
+        // Calculate the number of charges (Q)
+        const numberOfCharges = values.Q;
+
+        // Only place charges if Q > 0
+        if (numberOfCharges > 0) {
+            // Handle special case for 1 charge
+            if (numberOfCharges === 1) {
+                const chargeY = y; // Place the single charge at the center of the plate
+
+                // Place positive charge on the left plate
+                const positiveCharge = this.scene.add.image(leftX, chargeY, 'positive-img');
+                positiveCharge.setOrigin(chargesConfig.positive.originX, chargesConfig.positive.originY);
+                this.positiveCharges.push(positiveCharge);
+
+                // Place negative charge on the right plate
+                const negativeCharge = this.scene.add.image(rightX, chargeY, 'negative-img');
+                negativeCharge.setOrigin(chargesConfig.negative.originX, chargesConfig.negative.originY);
+                this.negativeCharges.push(negativeCharge);
+            } else {
+                // Spread charges along the plate height for 2 or more charges
+                for (let i = 0; i < numberOfCharges; i++) {
+                    // Calculate the vertical position for this charge
+                    const chargeY = y - plateHeight / 2 + (i / (numberOfCharges - 1)) * plateHeight;
+
+                    // Place positive charges on the left plate
+                    const positiveCharge = this.scene.add.image(leftX, chargeY, 'positive-img');
+                    positiveCharge.setOrigin(chargesConfig.positive.originX, chargesConfig.positive.originY);
+                    this.positiveCharges.push(positiveCharge);
+
+                    // Place negative charges on the right plate
+                    const negativeCharge = this.scene.add.image(rightX, chargeY, 'negative-img');
+                    negativeCharge.setOrigin(chargesConfig.negative.originX, chargesConfig.negative.originY);
+                    this.negativeCharges.push(negativeCharge);
+                }
+            }
+        }
+    }
+
+    // Method to create negative charges on the wires
+    createNegativeChargesOnWires() {
+        const wireChargeData = chargesConfig.wires;
+
+        // Create the charges based on the configuration
+        Object.keys(wireChargeData).forEach(key => {
+            if (key.startsWith("charge")) {
+                const chargeConfig = wireChargeData[key];
+
+                // Create a negative charge at the initial position
+                const negativeCharge = this.scene.add.image(chargeConfig.x, chargeConfig.y, 'negative-img');
+                negativeCharge.setOrigin(wireChargeData.originX, wireChargeData.originY);
+
+                // Store the charge's initial position and configuration for movement
+                negativeCharge.initialX = chargeConfig.x;
+                negativeCharge.initialY = chargeConfig.y;
+
+                // Store the charging and discharging directions from the config
+                negativeCharge.chargingDirection = chargeConfig.charging;
+                negativeCharge.dischargingDirection = chargeConfig.discharging;
+
+                // Add to the wire charges array for future updates
+                this.wireCharges.push(negativeCharge);
+            }
+        });
+    }
+
+    // Method to update the negative charges on the wires
+    updateNegativeChargesOnWires() {
+        const wireChargeData = chargesConfig.wires;
+
+        // Calculate the fraction of the maximum charge to scale movement distance
+        const chargeFraction = (values.Q / chargesConfig.platesMultiplier) / wireChargeData.maxCharge;
+        //console.log(chargeFraction);
+
+        // Update each charge's position based on the current switch status (charging or discharging)
+        this.wireCharges.forEach(charge => {
+            // Determine movement distance based on charge level
+            let movementDistance = wireChargeData.travel * chargeFraction;
+
+            // Reset charge position to initial coordinates
+            charge.x = charge.initialX;
+            charge.y = charge.initialY;
+
+            // Select movement direction based on switch status
+            const movementDirection = switchStatus === 'charging' ? charge.chargingDirection : charge.dischargingDirection;
+
+            // Adjust the position based on the movement direction and distance
+            switch (movementDirection) {
+                case 'left':
+                    charge.x -= movementDistance;
+                    break;
+                case 'right':
+                    charge.x += movementDistance;
+                    break;
+                case 'up':
+                    charge.y -= movementDistance;
+                    break;
+                case 'down':
+                    charge.y += movementDistance;
+                    break;
+                case 'origin': // No movement if the target is "origin"
+                    break;
+                default:
+                    console.warn(`Unknown movement direction: ${movementDirection}`);
+            }
+        });
+    }
+
+}
+
+class CustomImage {
+    constructor(scene, imageName, configRef){
+        this.scene = scene;
+        this.imageName = imageName;
+        this.configRef = configRef;
+    }
+
+    create(){
+        this.image = this.scene.add.image(this.configRef.x, this.configRef.y, this.imageName);
+        this.image.setScale(this.configRef.scale);
+        this.image.setOrigin(this.configRef.originX, this.configRef.originY);
+    }
+
+    setPosition(x, y) {
+        this.image.setPosition(x, y);
+    }
+
+    setVisible(visible) {
+        this.image.setVisible(visible);
+    }
+}
+
+class Slider {
+    constructor(scene, name) {
+        this.scene = scene;
+        this.name = name;
+        this.config = sliderConfig.sliders[name];
+        this.handleConfig = sliderConfig.handle;
+        this.handle = null;
+        this.track = null;
+    }
+
+    create() {
+        this.createTrack(); // Create track before creating handle
+        this.handle = this.scene.add.image(this.calculateInitialPosition(), this.config.y, 'handle');
+        this.handle.setOrigin(this.handleConfig.originX, this.handleConfig.originY);
+        this.handle.setScale(this.handleConfig.scale);
+        this.handle.setInteractive({ useHandCursor: true });
+        this.addDragBehavior();
+        this.updateTrack(); // Initial track update
+    }
+
+    createTrack() {
+        const { slideLeftX, slideRightX, y } = this.handleConfig;
+        this.track = this.scene.add.graphics();
+        this.track.lineStyle(sliderConfig.track.lineThickness, sliderConfig.track.lineTint);
+        this.updateTrack(); // Ensure track is initially updated
+    }
+
+    destroyTrack() {
+        if (this.track) {
+            this.track.destroy();
+            this.track = null;
+        }
+    }
+
+    updateTrack() {
+        if (this.handle && this.track) {
+            const { slideLeftX, slideRightX } = this.handleConfig;
+            const handleX = this.handle.x;
+            const { y } = this.config;
+            const zeroX = this.convertValueToPosition(0);
+            const clampedZeroX = Phaser.Math.Clamp(zeroX, slideLeftX, slideRightX);
+            this.track.clear();
+            this.track.lineStyle(sliderConfig.track.lineThickness, sliderConfig.track.lineTint);
+            this.track.beginPath();
+            this.track.moveTo(clampedZeroX, y);
+            this.track.lineTo(handleX, y);
+            this.track.strokePath();
+        }
+    }
+
+    calculateInitialPosition(startValue = this.config.startVal) {
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const { minVal, maxVal } = this.config;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (startValue - minVal) / range;
+        return slideLeftX + valueRatio * sliderRange;
+    }
+
+    addDragBehavior() {
+        this.scene.input.setDraggable(this.handle);
+        this.handle.on('drag', (pointer, dragX) => {
+
+            dragX = Phaser.Math.Clamp(dragX, this.handleConfig.slideLeftX, this.handleConfig.slideRightX);
+
+            this.handle.x = dragX;
+            this.updateTrack();
+
+            const newValue = this.calculateValue();
+            
+            // Use the mapping to correctly update the values object
+            const mappedKey = valueKeysMapping[this.name];
+            values[mappedKey] = newValue;
+
+            visualization.updateOnSliderDrag(mappedKey);
+        });
+    }
+
+    calculateValue() {
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const { minVal, maxVal } = this.config;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (this.handle.x - slideLeftX) / sliderRange;
+        return minVal + valueRatio * range;
+    }
+
+    convertValueToPosition(value) {
+        const { minVal, maxVal } = this.config;
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (value - minVal) / range;
+        return slideLeftX + valueRatio * sliderRange;
+    }
+
+    // New Method: Set the slider to a specific value
+    setValue(value) {
+        // Convert the value to a position on the slider track
+        const position = this.convertValueToPosition(value);
+        // Update the handle's x position to match the value
+        this.handle.x = Phaser.Math.Clamp(position, this.handleConfig.slideLeftX, this.handleConfig.slideRightX);
+        // Update the track to match the new handle position
+        this.updateTrack();
+    }
+
+    setActive() {
+        // Enable dragging
+        this.handle.setInteractive({ useHandCursor: true });
+        // Change the handle texture to the active image
+        this.handle.setTexture('handle');
+    }
+
+    setInactive() {
+        // Disable dragging
+        this.handle.disableInteractive();
+        // Change the handle texture to the inactive image
+        this.handle.setTexture('handle-inactive');
+    }
+}
+
+function preload() {
+    // Load backgrounds
+    this.load.image('qEqualsQ0eToTheMinus1OverRC-bg', 'qEqualsQ0eToTheMinus1OverRC_bg.PNG'); // upper case png is important for GitHub
+    this.load.image('iEqualsI0eToTheMinus1OverRC-bg', 'iEqualsI0eToTheMinus1OverRC_bg.PNG');
+    this.load.image('vEqualsV0eToTheMinus1OverRC-bg', 'vEqualsV0eToTheMinus1OverRC_bg.PNG');
+
+    // Load slider handle images
+    this.load.image('handle', 'handle.png');
+    this.load.image('handle-inactive', 'handle_inactive.png');
+
+    // Load ui images
+    this.load.image('playBtn-img', 'playBtn_img.png');
+    this.load.image('pauseBtn-img', 'pauseBtn_img.png');
+
+    // Load y axis label images
+    this.load.image('axisLabelQ-img', 'axisLabelQ_img.png');
+    this.load.image('axisLabelI-img', 'axisLabelI_img.png');
+    this.load.image('axisLabelV-img', 'axisLabelV_img.png');
+
+    // Load positive and negative charge images
+    this.load.image('positive-img', 'positive_img.png');
+    this.load.image('negative-img', 'negative_img.png');
+
+    // Radio button images
+    this.load.image('radioButtonSelected-img', 'radioButtonSelected_img.png');
+    this.load.image('radioButtonUnselected-img', 'radioButtonUnselected_img.png');
+
+    // Load on and off images for slide switches
+    this.load.image('switchOn-img', 'switchOn_img.png');
+    this.load.image('switchOff-img', 'switchOff_img.png');
+
+    // Load sliders
+    let sliderNames = Object.keys(sliderConfig.sliders);
+    sliderNames.forEach(name => {
+        let slider = new Slider(this, name);
+        sliders.push(slider);
+    });
+}
+
+function create() {
+
+    // Create backgrounds
+    //background = new CustomImage(this, 'qEqualsQ0eToTheMinus1OverRC-bg', bgConfig);
+    //background.create();
+
+    //let testObject = new Test(this, 100, 100); // Starting position (100, 100)
+    //testObject.create();
+
+    timeManager = new TimeManager();
+
+    calculations = new Calculations();
+
+    graph = new Graph(this);
+    graph.create();
+
+    chargeDischargeSwitch = new Switch(this);
+    chargeDischargeSwitch.create();
+
+    // Create sliders
+    sliders.forEach(slider => {
+        slider.create();
+        if (slider.name === 'tHandle') {  // Check if this is the time slider
+            timeSlider = slider;  // Assign it to the global variable
+        }
+    });
+
+    radioGroup = new RadioButtonGroup(this, radioButtonGroups, 'group1'); //visualizationChoice
+    radioGroup.create();
+
+    charges = new Charges(this);
+
+    visualization = new Visualization(this);
+    visualization.create();
+
+    ui = new UI(this);
+    ui.create();
+}
+
+function update() {
+    if (playing && !dischargeFinished && switchStatus === 'discharging') {
+        visualization.updateOnTick();
+    }
+}
+</script>
