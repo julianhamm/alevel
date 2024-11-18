@@ -1,0 +1,1370 @@
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.15.1/dist/phaser-arcade-physics.min.js"></script>
+<script>
+
+var config = {
+    width: 1200,
+    height: 500,
+    type: Phaser.AUTO,
+    scene: {
+        preload: preload,
+        create: create,
+        update: update
+    },
+    backgroundColor: '#FFFFFF',
+    pixelArt: false // Enable texture smoothing
+};
+
+var bgConfig = {
+    scale: 1,
+    x: 0,
+    y: 0,
+    originX: 0,
+    originY: 0
+};
+
+const visualizationConfig = { // defines the stage on which graphical objects will be placed
+    topLeft: {
+        x: 599,
+        y: 42
+    },
+    bottomRight: {
+        x: 1161,
+        y: 451
+    },
+    Q: {
+        x: 752,
+        y: 73
+    },
+    q: {
+        x: 803,
+        y: 73
+    }
+}
+
+const depthConfig = {
+    arrowFill: 1,      // Depth for the arrow fill
+    charge: 2,         // Depth for the charge
+    arrowOutline: 3,   // Depth for the arrow outline
+    sign: 4            // Depth for the sign    
+}
+
+const shapesConfig = {
+    charge: {
+        originX: 0.5,
+        originY: 0.5,
+        maxRadius: 20,
+        minDisplayCharge: 0.02,
+        positive: {
+            fillTint: '0xC00000', // deep red
+            cross: {
+                tint: '0xFFFFFF', // white
+                lineThickness: 4,
+                diameterProportion: 0.6
+            }
+        },
+        negative: {
+            fillTint: '0xA6A6A6', // mid grey
+            minusSign: {
+                tint: '0xFFFFFF', // white
+                lineThickness: 4,
+                diameterProportion: 0.6
+            }            
+        }      
+    },
+    forceArrow: {
+        pixelScale: 2000, // scales value to length
+        lineThickness: 2,
+        lineTint: '0xFF0000', // bright red
+        fillTint: '0xC00000', // deep red
+        width: 10,
+        head: {
+            length: 15,
+            width: 22
+        },
+    }
+}
+
+const labelsConfig = {
+    fontSize: 15,
+    font:'Calibri',
+    valueDistanceBelowLabel: 22,
+    originX: 0.5,
+    originY: 0.5,
+    Q: {
+        distance: 60, // above charge Q
+        image: 'QLabelText-img',
+        unit: '\u00B5C', //Unicode escape sequence for the micro symbol: 'µC',
+        fontTint: '#FFA218', // orange
+        decimalPlaces: 2
+    },
+    q: {
+        distance: 60, // above charge q
+        image: 'qSmallLabelText-img',
+        unit: '\u00B5C', //Unicode escape sequence for the micro symbol: 'µC',
+        fontTint: '#FFA218', // orange
+        decimalPlaces: 2
+    },    
+    FQ: {
+        distance: 20, // to one side of the FQ arrow
+        image: 'FLabelText-img',
+        unit: 'N',
+        fontTint: '#FFA218', // orange
+        decimalPlaces: 3
+    },
+    Fq: {
+        distance: 20, // to one side of the Fq arrow
+        image: 'FLabelText-img',
+        unit: 'N',
+        fontTint: '#FFA218', // orange
+        decimalPlaces: 3
+    },    
+    r: {
+        distance: 15, // below the radius scale marker
+        image: 'rLabelText-img',        
+        unit: 'm',
+        fontTint: '#FFA218', // orange
+        decimalPlaces: 2
+    },
+    radiusScaleMarker: {
+        distanceBelowCharges: 30,
+        lineThickness: 2,
+        lineTint: '0xFFA218', // orange
+        arrowHeads: {
+            image: 'lengthArrowOrange-img',
+            left: {
+                originX: 0,
+                originY: 0.5
+            },
+            right: {
+                originX: 0,
+                originY: 0.5                
+            }
+        }
+    }
+}
+
+var sliderConfig = {
+    handle: {
+        scale: 0.25,
+        originX: 0.5,
+        originY: 0.5,
+        slideLeftX: 104,
+        slideRightX: 371
+    },
+    sliders: {
+        QHandle: {
+            y: 273,
+            minVal: -0.3,
+            maxVal: 0.3,
+            startVal: 0.2
+        },
+        qHandle: {
+            y: 356,
+            minVal: -0.3,
+            maxVal: 0.3,
+            startVal: 0.2
+        },
+        rHandle: {
+            y: 444,
+            minVal: 0.1,
+            maxVal: 0.6,
+            startVal: 0.1
+        },
+    },
+    track: {
+        lineThickness: 4,
+        lineTint: '0xFFA218' //orange
+    }
+};
+
+const graphConfig = {
+    topLeft: {
+        x: 752,
+        y: 196
+    },
+    bottomRight: {
+        x: 1059,
+        y: 401
+    },
+    radiusMin: sliderConfig.sliders.rHandle.minVal, // min separation in metres for the graph
+    radiusMax: sliderConfig.sliders.rHandle.maxVal, // max separation in metres
+    forceMax: 0.08, // force in newtons
+    separationIncrement: 0.01, // in metres for
+    lineThickness: 3,
+    lineTint: '0xFFA218', //orange
+    dot: { // for showing the current value of r on the curve
+        radius: 7, // pixels
+        tint: '0xFFA218', //orange
+        originX: 0.5,
+        originY: 0.5
+    }
+}
+
+let switchConfig = {
+    scale: 1,
+    x: 540,
+    originX: 0,
+    originY: 0.5,
+    xNudge: 0,
+    yNudge: 0,
+    font: 'Calibri',
+    textSize: 16,
+    textTint: '#FFFFFF',
+    textPositionLeftOfSwitch: 10,
+    Q: {
+        y: 59,
+        words: '',
+        startState: 'off'
+    },
+    q: {
+        y: 88,
+        words: '',
+        startState: 'off'
+    },
+    r: {
+        y: 117,
+        words: '',
+        startState: 'off'
+    },
+    F: {
+        y: 146,
+        words: '',
+        startState: 'off'
+    },    
+};
+
+let values = {
+    Q: sliderConfig.sliders.QHandle.startVal,
+    q: sliderConfig.sliders.qHandle.startVal,
+    r: sliderConfig.sliders.rHandle.startVal,
+    F: null
+};
+
+let info = {
+    Q: {
+        x: visualizationConfig.Q.x,
+        y: visualizationConfig.Q.y
+    },
+    q: {
+        x: visualizationConfig.q.x,
+        y: visualizationConfig.q.y
+    },
+    r: {
+        x: null, // Placeholder for coordinates
+        y: null  // Placeholder for coordinates
+    },
+    FQ: {
+        x: null, // Placeholder for coordinates
+        y: null,  // Placeholder for coordinates
+        direction: null // values 'left' or 'right'
+    },
+    Fq: {
+        x: null, // Placeholder for coordinates
+        y: null,  // Placeholder for coordinates
+        direction: null // values 'left' or 'right'
+    },
+    labels: {
+        Q: {
+            x: visualizationConfig.Q.x,
+            y: visualizationConfig.Q.y
+        },
+        q: {
+            x: visualizationConfig.q.x,
+            y: visualizationConfig.q.y
+        },
+        r: {
+            x: null, // Placeholder for coordinates
+            y: null  // Placeholder for coordinates
+        },
+        FQ: {
+            x: null, // Placeholder for coordinates
+            y: null,  // Placeholder for coordinates
+        },
+        Fq: {
+            x: null, // Placeholder for coordinates
+            y: null,  // Placeholder for coordinates
+        }        
+    }
+};
+
+const valueKeysMapping = {
+    'QHandle': 'Q',
+    'qHandle': 'q',
+    'rHandle': 'r'
+};
+
+let showQValue = false;
+let showqValue = false;
+let showrValue = false;
+let showFValue = false;
+
+let game = new Phaser.Game(config);
+let sliders = [];
+let ui;
+
+let visualization;
+
+let chargeQ;
+let chargeq;
+
+let arrows;
+
+let calculations;
+let graph;
+let labels;
+
+let background;
+
+class Test {
+    constructor(scene, x, y) {
+        this.scene = scene;
+        this.x = x;
+        this.y = y;
+        this.handle = null;
+    }
+
+    create() {
+
+        // Create the handle image with 50% alpha
+        this.handle = this.scene.add.image(this.x, this.y, 'handle');
+        this.handle.setAlpha(0.5);
+        this.handle.setScale(0.2); // Scale the handle to 20%
+        this.handle.setInteractive({ useHandCursor: true });
+
+        // Make the handle draggable
+        this.scene.input.setDraggable(this.handle);
+
+        // Output the coordinates to the console when dragging
+        this.handle.on('drag', (pointer, dragX, dragY) => {
+            this.handle.setPosition(dragX, dragY);
+            console.log(`x: ${dragX}, y: ${dragY}`);
+        });
+    }
+}
+
+class Calculations {
+    constructor() {
+        // Placeholder for any initialization if needed
+    }
+
+    // Method to calculate force using Coulomb's Law
+    calculateForce() {
+        const k = 8.987e9; // Coulomb constant (Nm^2/C^2)
+
+        // Retrieve charge values and separation
+        const Q = values.Q * 1e-6; // Convert microcoulombs to coulombs
+        const q = values.q * 1e-6; // Convert microcoulombs to coulombs
+        const r = values.r; // Distance in meters (assumed from slider)
+
+        // Edge case: Avoid division by zero or very small values of r
+        if (r <= 0) {
+            values.F = 0; // Set force to zero if separation is invalid
+            return;
+        }
+
+        // Apply Coulomb's Law
+        values.F = k * Math.abs(Q * q) / (r * r); // Magnitude of the force
+    }
+}
+
+class Visualization {
+    constructor(scene) {
+        this.scene = scene;
+    }
+
+    create() {
+        chargeQ.createCharge();
+        chargeq.createCharge();
+
+        calculations.calculateForce();
+        arrows.create();
+        graph.create();
+        labels.createLabels();
+        labels.toggleValuesVisibility();
+    }
+
+    // Call this when the slider is dragged to update the plates
+    updateOnSliderDrag(sliderType) {
+        chargeQ.updateCharge(values.Q);
+        chargeq.updateCharge(values.q);
+
+        calculations.calculateForce();
+        arrows.placeArrows();
+        graph.updateGraph();
+        graph.placeDot();
+        labels.updateLabels();
+    }
+
+    toggleValuesDisplay() {
+        labels.toggleValuesVisibility();
+    }
+}
+
+class Labels {
+    constructor(scene) {
+        this.scene = scene;
+        this.distanceLine = null; // Line representing the distance
+        this.leftArrowhead = null; // Left-pointing arrowhead
+        this.rightArrowhead = null; // Right-pointing arrowhead
+        this.rLabel = null; // Label for the distance 'r'
+        this.chargeLabels = { Q: null, q: null }; // Labels for charges Q and q
+        this.forceLabels = { FQ: null, Fq: null }; // Labels for forces on Q and q
+        this.valueFields = {}; // Text objects for the values
+    }
+
+    createLabels() {
+        this.createDistanceArrow();
+        this.placeRLabel();
+        this.placeChargeLabels();
+        this.placeForceLabels();
+        this.createValueFields();
+    }
+
+    updateLabels() {
+        this.updateDistanceArrow();
+        this.updateRLabel();
+        this.updateChargeLabels();
+        this.updateForceLabels();
+        this.updateValueFields(); // Ensure values stay aligned
+    }
+
+    createDistanceArrow() {
+        const { lineTint, lineThickness, arrowHeads, distanceBelowCharges } = labelsConfig.radiusScaleMarker;
+
+        if (this.distanceLine) this.distanceLine.destroy();
+        if (this.leftArrowhead) this.leftArrowhead.destroy();
+        if (this.rightArrowhead) this.rightArrowhead.destroy();
+
+        const Qx = info.Q.x;
+        const Qy = info.Q.y + distanceBelowCharges; // Offset below charges
+        const qx = info.q.x;
+
+        this.distanceLine = this.scene.add.graphics();
+        this.distanceLine.lineStyle(lineThickness, Phaser.Display.Color.HexStringToColor(lineTint).color);
+        this.distanceLine.beginPath();
+        this.distanceLine.moveTo(Qx, Qy);
+        this.distanceLine.lineTo(qx, Qy);
+        this.distanceLine.strokePath();
+
+        this.leftArrowhead = this.scene.add.image(Qx, Qy, arrowHeads.image);
+        this.leftArrowhead.setOrigin(arrowHeads.left.originX, arrowHeads.left.originY);
+
+        this.rightArrowhead = this.scene.add.image(qx, Qy, arrowHeads.image);
+        this.rightArrowhead.setOrigin(arrowHeads.right.originX, arrowHeads.right.originY);
+        this.rightArrowhead.setScale(-1, 1);
+
+        const rLabelX = (Qx + qx) / 2;
+        const rLabelY = Qy + labelsConfig.r.distance;
+
+        info.r.x = rLabelX;
+        info.r.y = rLabelY;
+    }
+
+    updateDistanceArrow() {
+        const { distanceBelowCharges } = labelsConfig.radiusScaleMarker;
+
+        const Qx = info.Q.x;
+        const Qy = info.Q.y + distanceBelowCharges;
+        const qx = info.q.x;
+
+        this.distanceLine.clear();
+        this.distanceLine.lineStyle(
+            labelsConfig.radiusScaleMarker.lineThickness,
+            Phaser.Display.Color.HexStringToColor(labelsConfig.radiusScaleMarker.lineTint).color
+        );
+        this.distanceLine.beginPath();
+        this.distanceLine.moveTo(Qx, Qy);
+        this.distanceLine.lineTo(qx, Qy);
+        this.distanceLine.strokePath();
+
+        this.leftArrowhead.setPosition(Qx, Qy);
+        this.rightArrowhead.setPosition(qx, Qy);
+
+        const rLabelX = (Qx + qx) / 2;
+        const rLabelY = Qy + labelsConfig.r.distance;
+
+        info.r.x = rLabelX;
+        info.r.y = rLabelY;
+    }
+
+    placeRLabel() {
+        const { r } = labelsConfig;
+        const { x, y } = info.r;
+
+        if (this.rLabel) this.rLabel.destroy();
+
+        this.rLabel = this.scene.add.image(x, y, r.image);
+        this.rLabel.setOrigin(labelsConfig.originX, labelsConfig.originY);
+
+        info.labels.r.x = x;
+        info.labels.r.y = y;
+    }
+
+    updateRLabel() {
+        const { r } = labelsConfig;
+        const { x, y } = info.r;
+
+        if (this.rLabel) {
+            this.rLabel.setPosition(x, y);
+            info.labels.r.x = x;
+            info.labels.r.y = y;
+        }
+    }
+
+    placeChargeLabels() {
+        const { Q, q, originX, originY } = labelsConfig;
+
+        if (!this.chargeLabels.Q) {
+            const Qx = info.Q.x;
+            const Qy = info.Q.y - Q.distance;
+
+            this.chargeLabels.Q = this.scene.add.image(Qx, Qy, Q.image);
+            this.chargeLabels.Q.setOrigin(originX, originY);
+
+            info.labels.Q.x = Qx;
+            info.labels.Q.y = Qy;
+        }
+
+        if (!this.chargeLabels.q) {
+            const qx = info.q.x;
+            const qy = info.q.y - q.distance;
+
+            this.chargeLabels.q = this.scene.add.image(qx, qy, q.image);
+            this.chargeLabels.q.setOrigin(originX, originY);
+
+            info.labels.q.x = qx;
+            info.labels.q.y = qy;
+        }
+    }
+
+    updateChargeLabels() {
+        const { q, originX, originY } = labelsConfig;
+
+        if (this.chargeLabels.q) {
+            const qx = info.q.x;
+            const qy = info.q.y - q.distance;
+            this.chargeLabels.q.setPosition(qx, qy);
+            this.chargeLabels.q.setOrigin(originX, originY);
+
+            info.labels.q.x = qx;
+            info.labels.q.y = qy;
+        }
+    }
+
+    placeForceLabels() {
+        const { FQ, Fq, originX, originY } = labelsConfig;
+
+        const { x: FQx, y: FQy, direction: FQDirection } = info.FQ;
+        const FQLabelX = FQDirection === 'left' ? FQx - FQ.distance : FQx + FQ.distance;
+        const FQLabelY = FQy;
+
+        if (!this.forceLabels.FQ) {
+            this.forceLabels.FQ = this.scene.add.image(FQLabelX, FQLabelY, FQ.image);
+            this.forceLabels.FQ.setOrigin(originX, originY);
+
+            info.labels.FQ.x = FQLabelX;
+            info.labels.FQ.y = FQLabelY;
+        }
+
+        const { x: Fqx, y: Fqy, direction: FqDirection } = info.Fq;
+        const FqLabelX = FqDirection === 'left' ? Fqx - Fq.distance : Fqx + Fq.distance;
+        const FqLabelY = Fqy;
+
+        if (!this.forceLabels.Fq) {
+            this.forceLabels.Fq = this.scene.add.image(FqLabelX, FqLabelY, Fq.image);
+            this.forceLabels.Fq.setOrigin(originX, originY);
+
+            info.labels.Fq.x = FqLabelX;
+            info.labels.Fq.y = FqLabelY;
+        }
+    }
+
+    updateForceLabels() {
+        const { FQ, Fq, originX, originY } = labelsConfig;
+
+        const { x: FQx, y: FQy, direction: FQDirection } = info.FQ;
+        const FQLabelX = FQDirection === 'left' ? FQx - FQ.distance : FQx + FQ.distance;
+        const FQLabelY = FQy;
+
+        if (this.forceLabels.FQ) {
+            this.forceLabels.FQ.setPosition(FQLabelX, FQLabelY);
+            this.forceLabels.FQ.setOrigin(originX, originY);
+
+            info.labels.FQ.x = FQLabelX;
+            info.labels.FQ.y = FQLabelY;
+        }
+
+        const { x: Fqx, y: Fqy, direction: FqDirection } = info.Fq;
+        const FqLabelX = FqDirection === 'left' ? Fqx - Fq.distance : Fqx + Fq.distance;
+        const FqLabelY = Fqy;
+
+        if (this.forceLabels.Fq) {
+            this.forceLabels.Fq.setPosition(FqLabelX, FqLabelY);
+            this.forceLabels.Fq.setOrigin(originX, originY);
+
+            info.labels.Fq.x = FqLabelX;
+            info.labels.Fq.y = FqLabelY;
+        }
+    }
+
+    createValueFields() {
+        const keys = ["Q", "q", "r", "FQ", "Fq"];
+        keys.forEach((key) => {
+            const config = labelsConfig[key];
+            const { x, y } = info.labels[key];
+
+            if (!this.valueFields[key]) {
+                this.valueFields[key] = this.scene.add.text(
+                    x,
+                    y + labelsConfig.valueDistanceBelowLabel,
+                    "",
+                    {
+                        font: `${labelsConfig.fontSize}px ${labelsConfig.font}`, // Use global fontSize and font
+                        fill: Phaser.Display.Color.HexStringToColor(config.fontTint).rgba,
+                        align: "center",
+                    }
+                ).setOrigin(labelsConfig.originX, labelsConfig.originY);
+            }
+        });
+        this.formatValues();
+    }
+
+    formatValues() {
+        const keys = ["Q", "q", "r", "FQ", "Fq"];
+        keys.forEach((key) => {
+            const config = labelsConfig[key];
+            const value = values[key] || (key === "r" ? values.r : values.F);
+
+            if (this.valueFields[key]) {
+                this.valueFields[key].setText(
+                    `${value.toFixed(config.decimalPlaces)} ${config.unit}`
+                );
+            }
+        });
+    }
+
+    updateValueFields() {
+        const keys = ["Q", "q", "r", "FQ", "Fq"];
+        keys.forEach((key) => {
+            const { x, y } = info.labels[key];
+            if (this.valueFields[key]) {
+                this.valueFields[key].setPosition(
+                    x,
+                    y + labelsConfig.valueDistanceBelowLabel
+                );
+            }
+        });
+        this.formatValues(); // Update text content to reflect latest values
+    }
+
+    toggleValuesVisibility() {
+        const visibilityMap = {
+            Q: showQValue,
+            q: showqValue,
+            r: showrValue,
+            FQ: showFValue,
+            Fq: showFValue // Assuming Fq and FQ visibility are controlled together
+        };
+
+        Object.keys(this.valueFields).forEach((key) => {
+            if (this.valueFields[key]) {
+                // Set visibility based on the corresponding flag
+                this.valueFields[key].setVisible(visibilityMap[key]);
+            }
+        });
+    }
+}
+
+class Graph {
+    constructor(scene) {
+        this.scene = scene;
+        this.dataPoints = []; // To store calculated graph points
+        this.graphDot = null; // Dot graphic for showing current r on the curve
+    }
+
+    create() {
+        this.generateDataPoints(); // Generate initial data points
+        this.plotGraph(); // Plot the graph
+
+        // Initialize the dot graphic
+        const { radius, tint, originX, originY } = graphConfig.dot;
+        this.graphDot = this.scene.add.circle(0, 0, radius, tint);
+        this.graphDot.setOrigin(originX, originY);
+
+        this.placeDot();
+    }
+
+    updateGraph() {
+        this.generateDataPoints(); // Recalculate data points with updated charges
+        this.plotGraph(); // Redraw the graph
+    }
+
+    generateDataPoints() {
+        // Calculate the pixel dimensions of the graph
+        const graphWidth = graphConfig.bottomRight.x - graphConfig.topLeft.x;
+        const graphHeight = graphConfig.bottomRight.y - graphConfig.topLeft.y;
+
+        // Alias config values for readability
+        const radiusMin = graphConfig.radiusMin;
+        const radiusMax = graphConfig.radiusMax;
+        const forceMax = graphConfig.forceMax;
+        const increment = graphConfig.separationIncrement;
+
+        // Calculate the radius for maximum force
+        const rForMaxForce = this.calculateRadiusForForce(forceMax);
+
+        // Start with the maximum force point
+        this.dataPoints = [];
+        let r = rForMaxForce;
+        let F = this.calculateForce(r);
+
+        // Map r and F to pixel coordinates
+        let x = this.mapRToX(r, graphWidth);
+        let y = this.mapFToY(F, graphHeight, forceMax);
+
+        this.dataPoints.push({ r, F, x, y });
+
+        // Generate subsequent points up to radiusMax
+        for (r += increment; r < radiusMax; r += increment) {
+            F = this.calculateForce(r);
+            x = this.mapRToX(r, graphWidth);
+            y = this.mapFToY(F, graphHeight, forceMax);
+
+            this.dataPoints.push({ r, F, x, y });
+        }
+
+        // Ensure the last point is exactly at radiusMax
+        r = radiusMax;
+        F = this.calculateForce(r);
+        x = this.mapRToX(r, graphWidth);
+        y = this.mapFToY(F, graphHeight, forceMax);
+
+        this.dataPoints.push({ r, F, x, y });
+    }
+
+    plotGraph() {
+        // Remove any previous graph line
+        if (this.graphLine) {
+            this.graphLine.destroy();
+        }
+
+        // Create a new graphics object for the graph
+        this.graphLine = this.scene.add.graphics();
+        this.graphLine.lineStyle(graphConfig.lineThickness, graphConfig.lineTint);
+
+        // Draw the graph line
+        this.graphLine.beginPath();
+        for (let i = 0; i < this.dataPoints.length; i++) {
+            const { x, y } = this.dataPoints[i];
+            if (i === 0) {
+                this.graphLine.moveTo(x, y);
+            } else {
+                this.graphLine.lineTo(x, y);
+            }
+        }
+        this.graphLine.strokePath();
+    }
+
+    placeDot() {
+        const r = values.r; // Current radius value
+        const radiusMax = graphConfig.radiusMax;
+        const forceMax = graphConfig.forceMax;
+
+        // Calculate the force at the current radius
+        const F = this.calculateForce(r);
+
+        // Calculate pixel positions for the dot
+        const graphWidth = graphConfig.bottomRight.x - graphConfig.topLeft.x;
+        const graphHeight = graphConfig.bottomRight.y - graphConfig.topLeft.y;
+
+        const x = this.mapRToX(r, graphWidth); // Map r to x-pixel position
+        const y = this.mapFToY(F, graphHeight, forceMax); // Map F to y-pixel position
+
+        // Position and show the dot
+        this.graphDot.setPosition(x, y);
+    }
+
+    // Calculate the force using Coulomb's law
+    calculateForce(r) {
+        const k = 8.987e9; // Coulomb constant (Nm^2/C^2)
+        const Q = values.Q * 1e-6; // Convert microcoulombs to coulombs
+        const q = values.q * 1e-6; // Convert microcoulombs to coulombs
+        return k * Math.abs(Q * q) / (r * r); // Coulomb's law: F = k|Qq|/r²
+    }
+
+    // Calculate radius for a given force using the inverse of Coulomb's law
+    calculateRadiusForForce(F) {
+        const k = 8.987e9; // Coulomb constant (Nm^2/C^2)
+        const Q = values.Q * 1e-6; // Convert microcoulombs to coulombs
+        const q = values.q * 1e-6; // Convert microcoulombs to coulombs
+        return Math.sqrt(k * Math.abs(Q * q) / F); // Inverse of F = k|Qq|/r²
+    }
+
+    // Map radius to x-pixel position
+    mapRToX(r, graphWidth) {
+        return graphConfig.topLeft.x + (r * graphWidth / graphConfig.radiusMax);
+    }
+
+    // Map force to y-pixel position
+    mapFToY(F, graphHeight, forceMax) {
+        return graphConfig.bottomRight.y - (F / forceMax) * graphHeight;
+    }
+}
+
+class Charge {
+    constructor(scene, chargeType) {
+        this.scene = scene;
+        this.chargeType = chargeType; // 'Q' or 'q'
+        this.circle = null; // Circle representing the charge
+        this.sign = null; // Cross or minus sign inside the circle
+    }
+
+    createCharge() {
+        const config = visualizationConfig[this.chargeType];
+        const x = config.x;
+        const y = config.y;
+
+        // Destroy any existing graphics
+        if (this.circle) this.circle.destroy();
+        if (this.sign) this.sign.destroy();
+
+        const chargeValue = values[this.chargeType];
+        const maxValue = sliderConfig.sliders[`${this.chargeType}Handle`].maxVal;
+
+        const radius = this.calculateRadius(chargeValue, maxValue);
+        const isPositive = chargeValue >= 0;
+
+        // Create the circle
+        this.circle = this.createCircle(radius, isPositive);
+        this.circle.setPosition(x, y);
+        this.circle.setDepth(depthConfig.charge);
+
+        // Create the sign
+        this.sign = this.createSign(radius, isPositive, chargeValue);
+        if (this.sign) {
+            this.sign.setPosition(x, y);
+            this.sign.setDepth(depthConfig.sign);
+        }
+    }
+
+    updateCharge(value) {
+        const maxValue = sliderConfig.sliders[`${this.chargeType}Handle`].maxVal;
+
+        // Destroy current graphics
+        if (this.circle) this.circle.destroy();
+        if (this.sign) this.sign.destroy();
+
+        const config = visualizationConfig[this.chargeType];
+        const x = config.x;
+        const y = config.y;
+
+        const radius = this.calculateRadius(value, maxValue);
+        const isPositive = value >= 0;
+
+        // Create updated circle
+        this.circle = this.createCircle(radius, isPositive);
+        this.circle.setPosition(x, y);
+        this.circle.setDepth(depthConfig.charge);
+
+        // Create updated sign
+        this.sign = this.createSign(radius, isPositive, value);
+        if (this.sign) {
+            this.sign.setPosition(x, y);
+            this.sign.setDepth(depthConfig.sign);
+        }
+
+        // Move charge 'q' dynamically if needed
+        if (this.chargeType === 'q') {
+            this.moveCharge();
+        }
+    }
+
+    moveCharge() {
+        const r = values.r; // Get the current radius value
+
+        // Calculate the scaled x-position for charge 'q'
+        const graphWidth = graphConfig.bottomRight.x - graphConfig.topLeft.x;
+        const x = graphConfig.topLeft.x + (r * graphWidth / graphConfig.radiusMax);
+
+        // Update the circle and sign positions
+        if (this.circle) this.circle.setPosition(x, visualizationConfig.q.y);
+        if (this.sign) this.sign.setPosition(x, visualizationConfig.q.y);
+
+        // Update the `info` object with the new position
+        info.q.x = x;
+        info.q.y = visualizationConfig.q.y;
+    }
+
+    calculateRadius(chargeValue, maxValue) {
+        const maxRadius = shapesConfig.charge.maxRadius;
+        const normalizedCharge = Math.abs(chargeValue) / maxValue;
+        return Math.sqrt(normalizedCharge) * maxRadius;
+    }
+
+    createCircle(radius, isPositive) {
+        const fillTint = isPositive
+            ? shapesConfig.charge.positive.fillTint
+            : shapesConfig.charge.negative.fillTint;
+
+        const circle = this.scene.add.circle(0, 0, radius, fillTint);
+        circle.setOrigin(shapesConfig.charge.originX, shapesConfig.charge.originY);
+        return circle;
+    }
+
+    createSign(radius, isPositive, chargeValue) {
+        if (Math.abs(chargeValue) < shapesConfig.charge.minDisplayCharge) {
+            return null; // Don't create a sign for very small charges
+        }
+
+        const config = isPositive
+            ? shapesConfig.charge.positive.cross
+            : shapesConfig.charge.negative.minusSign;
+
+        const signLength = radius * 2 * config.diameterProportion;
+
+        const sign = this.scene.add.graphics();
+        sign.lineStyle(config.lineThickness, config.tint);
+
+        sign.beginPath();
+        if (isPositive) {
+            // Draw cross
+            sign.moveTo(-signLength / 2, 0); // Horizontal
+            sign.lineTo(signLength / 2, 0);
+            sign.moveTo(0, -signLength / 2); // Vertical
+            sign.lineTo(0, signLength / 2);
+        } else {
+            // Draw minus sign
+            sign.moveTo(-signLength / 2, 0); // Horizontal only
+            sign.lineTo(signLength / 2, 0);
+        }
+        sign.strokePath();
+
+        return sign;
+    }
+}
+
+class Arrows {
+    constructor(scene) {
+        this.scene = scene;
+
+        // Holds the predefined shapes for the force arrow
+        this.forceArrowShape = [];
+
+        // Graphics for the arrows
+        this.arrowOnQ = null; // Arrow for the force on Q
+        this.arrowOnq = null; // Arrow for the force on q
+
+        // Interaction type and direction flags
+        this.interaction = null; // 'attract' or 'repel'
+        this.directionQ = null; // 'left' or 'right' for Q's arrow
+        this.directionq = null; // 'left' or 'right' for q's arrow
+    }
+
+    // Initialize the arrow shape based on config
+    create() {
+        this.initializeArrowShape(this.forceArrowShape, shapesConfig.forceArrow);
+        this.placeArrows(); // Initial placement of arrows
+    }
+
+    // Define the base shape of the arrow
+    initializeArrowShape(arrowShapeArray, arrowConfig) {
+        const headLength = arrowConfig.head.length;
+        const headWidth = arrowConfig.head.width / 2;
+        const shaftWidth = arrowConfig.width / 2;
+
+        // Define the arrow polygon (left-pointing by default)
+        arrowShapeArray[0] = { x: 0, y: 0 }; // Tip of the arrow
+        arrowShapeArray[1] = { x: headLength, y: -headWidth }; // Top of the arrowhead
+        arrowShapeArray[2] = { x: headLength, y: -shaftWidth }; // Top of the shaft
+        arrowShapeArray[3] = { x: null, y: -shaftWidth }; // Placeholder for shaft end
+        arrowShapeArray[4] = { x: null, y: shaftWidth }; // Placeholder for shaft end
+        arrowShapeArray[5] = { x: headLength, y: shaftWidth }; // Bottom of the shaft
+        arrowShapeArray[6] = { x: headLength, y: headWidth }; // Bottom of the arrowhead
+    }
+
+    // Determine interaction type and direction flags
+    determineInteraction() {
+        const chargeQ = values.Q;
+        const chargeq = values.q;
+
+        // Determine if charges attract or repel
+        this.interaction = chargeQ * chargeq > 0 ? 'repel' : 'attract';
+
+        // Determine left or right for each arrow based on relative positions
+        const Qx = info.Q.x;
+        const qx = info.q.x;
+
+        if (this.interaction === 'repel') {
+            this.directionQ = Qx < qx ? 'left' : 'right';
+            this.directionq = qx > Qx ? 'right' : 'left';
+        } else {
+            this.directionQ = Qx < qx ? 'right' : 'left';
+            this.directionq = qx > Qx ? 'left' : 'right';
+        }
+    }
+
+    // Place arrows dynamically based on current force and charge positions
+    placeArrows() {
+        const force = values.F;
+        const config = shapesConfig.forceArrow;
+
+        // Determine interaction type and direction flags
+        this.determineInteraction();
+
+        // Scale the arrow length based on the force
+        let arrowLength = force * config.pixelScale;
+
+        // Draw the arrow on Q and update info
+        this.arrowOnQ = this.drawArrow(
+            info.Q.x,
+            info.Q.y,
+            arrowLength,
+            this.directionQ,
+            this.arrowOnQ
+        );
+
+        // Update info for Q arrow tip
+        info.FQ = this.calculateArrowTip(info.Q.x, info.Q.y, arrowLength, this.directionQ);
+
+        // Draw the arrow on q and update info
+        this.arrowOnq = this.drawArrow(
+            info.q.x,
+            info.q.y,
+            arrowLength,
+            this.directionq,
+            this.arrowOnq
+        );
+
+        // Update info for q arrow tip
+        info.Fq = this.calculateArrowTip(info.q.x, info.q.y, arrowLength, this.directionq);
+    }
+
+    // Helper to calculate the tip position and direction of an arrow
+    calculateArrowTip(startX, startY, arrowLength, direction) {
+        const tipX = direction === 'left' ? startX - arrowLength : startX + arrowLength;
+        const tipY = startY;
+        return { x: tipX, y: tipY, direction: direction };
+    }
+
+    // Helper to draw or update a single arrow
+    drawArrow(startX, startY, arrowLength, direction, existingArrow) {
+        // Remove the existing graphic, if it exists
+        if (existingArrow && existingArrow.fill && existingArrow.outline) {
+            existingArrow.fill.destroy();
+            existingArrow.outline.destroy();
+        }
+
+        const headLength = shapesConfig.forceArrow.head.length;
+
+        // Ensure the arrow length is at least the head length
+        arrowLength = Math.max(arrowLength, headLength);
+
+        // Format the arrow shape by setting the shaft length
+        this.forceArrowShape[3].x = arrowLength; // End of shaft
+        this.forceArrowShape[4].x = arrowLength; // End of shaft
+
+        // Apply transformation for direction and placement
+        const transformedShape = this.forceArrowShape.map(point => {
+            const x =
+                direction === 'left'
+                    ? startX + point.x - arrowLength // Translate left to place the tail
+                    : startX - point.x + arrowLength; // Mirror and translate right
+            return { x, y: startY + point.y }; // No vertical translation
+        });
+
+        // Create graphics for the arrow fill
+        const arrowFill = this.scene.add.graphics();
+        arrowFill.setDepth(depthConfig.arrowFill); // Set depth for the fill
+        arrowFill.fillStyle(shapesConfig.forceArrow.fillTint, 1);
+        arrowFill.beginPath();
+        arrowFill.moveTo(transformedShape[0].x, transformedShape[0].y);
+        for (let i = 1; i < transformedShape.length; i++) {
+            arrowFill.lineTo(transformedShape[i].x, transformedShape[i].y);
+        }
+        arrowFill.closePath();
+        arrowFill.fillPath();
+
+        // Create graphics for the arrow outline
+        const arrowOutline = this.scene.add.graphics();
+        arrowOutline.setDepth(depthConfig.arrowOutline); // Set depth for the outline
+        arrowOutline.lineStyle(
+            shapesConfig.forceArrow.lineThickness,
+            shapesConfig.forceArrow.lineTint
+        );
+        arrowOutline.beginPath();
+        arrowOutline.moveTo(transformedShape[0].x, transformedShape[0].y);
+        for (let i = 1; i < transformedShape.length; i++) {
+            arrowOutline.lineTo(transformedShape[i].x, transformedShape[i].y);
+        }
+        arrowOutline.closePath();
+        arrowOutline.strokePath();
+
+        // Return both the fill and outline graphics as a combined object
+        return { fill: arrowFill, outline: arrowOutline };
+    }
+}
+
+class CustomImage {
+    constructor(scene, imageName, configRef){
+        this.scene = scene;
+        this.imageName = imageName;
+        this.configRef = configRef;
+    }
+
+    create(){
+        this.image = this.scene.add.image(this.configRef.x, this.configRef.y, this.imageName);
+        this.image.setScale(this.configRef.scale);
+        this.image.setOrigin(this.configRef.originX, this.configRef.originY);
+    }
+
+    setPosition(x, y) {
+        this.image.setPosition(x, y);
+    }
+
+    setVisible(visible) {
+        this.image.setVisible(visible);
+    }
+}
+
+class Slider {
+    constructor(scene, name) {
+        this.scene = scene;
+        this.name = name;
+        this.config = sliderConfig.sliders[name];
+        this.handleConfig = sliderConfig.handle;
+        this.handle = null;
+        this.track = null;
+    }
+
+    create() {
+        this.createTrack(); // Create track before creating handle
+        this.handle = this.scene.add.image(this.calculateInitialPosition(), this.config.y, 'handle');
+        this.handle.setOrigin(this.handleConfig.originX, this.handleConfig.originY);
+        this.handle.setScale(this.handleConfig.scale);
+        this.handle.setInteractive({ useHandCursor: true });
+        this.addDragBehavior();
+        this.updateTrack(); // Initial track update
+    }
+
+    createTrack() {
+        const { slideLeftX, slideRightX, y } = this.handleConfig;
+        this.track = this.scene.add.graphics();
+        this.track.lineStyle(sliderConfig.track.lineThickness, sliderConfig.track.lineTint);
+        this.updateTrack(); // Ensure track is initially updated
+    }
+
+    destroyTrack() {
+        if (this.track) {
+            this.track.destroy();
+            this.track = null;
+        }
+    }
+
+    updateTrack() {
+        if (this.handle && this.track) {
+            const { slideLeftX, slideRightX } = this.handleConfig;
+            const handleX = this.handle.x;
+            const { y } = this.config;
+            const zeroX = this.convertValueToPosition(0);
+            const clampedZeroX = Phaser.Math.Clamp(zeroX, slideLeftX, slideRightX);
+            this.track.clear();
+            this.track.lineStyle(sliderConfig.track.lineThickness, sliderConfig.track.lineTint);
+            this.track.beginPath();
+            this.track.moveTo(clampedZeroX, y);
+            this.track.lineTo(handleX, y);
+            this.track.strokePath();
+        }
+    }
+
+    calculateInitialPosition(startValue = this.config.startVal) {
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const { minVal, maxVal } = this.config;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (startValue - minVal) / range;
+        return slideLeftX + valueRatio * sliderRange;
+    }
+
+    addDragBehavior() {
+        this.scene.input.setDraggable(this.handle);
+        this.handle.on('drag', (pointer, dragX) => {
+
+            dragX = Phaser.Math.Clamp(dragX, this.handleConfig.slideLeftX, this.handleConfig.slideRightX);
+
+            this.handle.x = dragX;
+            this.updateTrack();
+
+            const newValue = this.calculateValue();
+            
+            // Use the mapping to correctly update the values object
+            const mappedKey = valueKeysMapping[this.name];
+            values[mappedKey] = newValue;
+
+            visualization.updateOnSliderDrag(mappedKey);
+        });
+    }
+
+    calculateValue() {
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const { minVal, maxVal } = this.config;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (this.handle.x - slideLeftX) / sliderRange;
+        return minVal + valueRatio * range;
+    }
+
+    convertValueToPosition(value) {
+        const { minVal, maxVal } = this.config;
+        const { slideLeftX, slideRightX } = this.handleConfig;
+        const range = maxVal - minVal;
+        const sliderRange = slideRightX - slideLeftX;
+        const valueRatio = (value - minVal) / range;
+        return slideLeftX + valueRatio * sliderRange;
+    }
+
+    // New Method: Set the slider to a specific value
+    setValue(value) {
+        // Convert the value to a position on the slider track
+        const position = this.convertValueToPosition(value);
+        // Update the handle's x position to match the value
+        this.handle.x = Phaser.Math.Clamp(position, this.handleConfig.slideLeftX, this.handleConfig.slideRightX);
+        // Update the track to match the new handle position
+        this.updateTrack();
+    }
+}
+
+class UI {
+    constructor(scene) {
+        this.scene = scene;
+        this.switches = {};
+        this.switchLabels = {}; // Store switch label texts
+    }
+
+    create() {
+        this.createSwitch('Q', switchConfig.Q);
+        this.createSwitch('q', switchConfig.q);
+        this.createSwitch('r', switchConfig.r);
+        this.createSwitch('F', switchConfig.F);
+    }
+
+    createSwitch(key, config) {
+        // Determine initial state image
+        const initialState = config.startState === 'on' ? 'switchOn-img' : 'switchOff-img';
+        
+        // Create the switch image with hand cursor
+        const switchImage = this.scene.add.image(switchConfig.x, config.y, initialState)
+            .setScale(switchConfig.scale)
+            .setOrigin(switchConfig.originX, switchConfig.originY)
+            .setInteractive({ cursor: 'pointer' });
+
+        // Store the switch state and image
+        this.switches[key] = {
+            state: config.startState,
+            image: switchImage
+        };
+
+        // Add the toggle functionality
+        switchImage.on('pointerdown', () => {
+            this.toggleSwitch(key);
+        });
+
+        // Add the label text for the switch
+        const switchLabel = this.scene.add.text(
+            switchConfig.x - switchConfig.textPositionLeftOfSwitch,
+            config.y,
+            config.words,
+            {
+                font: `${switchConfig.textSize}px ${switchConfig.font}`,
+                fill: Phaser.Display.Color.HexStringToColor(switchConfig.textTint).rgba,
+            }
+        ).setOrigin(1, 0.5); // Align text to the left of the switch
+
+        this.switchLabels[key] = switchLabel; // Store label text for toggling visibility
+    }
+
+    toggleSwitch(key) {
+        const switchData = this.switches[key];
+
+        // Toggle the state
+        switchData.state = switchData.state === 'on' ? 'off' : 'on';
+
+        // Update the switch image
+        const newStateImage = switchData.state === 'on' ? 'switchOn-img' : 'switchOff-img';
+        switchData.image.setTexture(newStateImage);
+
+        // Update the global state variables and call the appropriate method on Visualization
+        if (key === 'Q') {
+            showQValue = switchData.state === 'on'; // Update global variable
+        } else if (key === 'q') {
+            showqValue = switchData.state === 'on'; // Update global variable
+        } else if (key === 'r') {
+            showrValue = switchData.state === 'on'; // Update global variable
+        } else if (key === 'F') {
+            showFValue = switchData.state === 'on'; // Update global variable
+        }
+
+        visualization.toggleValuesDisplay();
+        
+    }
+}
+
+function preload() {
+    // Load backgrounds
+    this.load.image('fEqualsQqOver4PiEpsilon0rSquared-bg', 'fEqualsQqOver4PiEpsilon0rSquared_bg.PNG'); // upper case png is important for GitHub
+
+    // Load slider handle images
+    this.load.image('handle', 'handle.png');
+
+    // Load label images for arrows and charge
+    this.load.image('QLabelText-img', 'QLabelText_img.png');
+    this.load.image('qSmallLabelText-img', 'qSmallLabelText_img.png');    
+    this.load.image('FLabelText-img', 'FLabelText_img.png');
+    this.load.image('rLabelText-img', 'rLabelText_img.png');
+    this.load.image('lengthArrowOrange-img', 'lengthArrowOrange_img.png');
+
+    // Load on and off images for slide switches
+    this.load.image('switchOn-img', 'switchOn_img.png');
+    this.load.image('switchOff-img', 'switchOff_img.png');
+
+    // Load sliders
+    let sliderNames = Object.keys(sliderConfig.sliders);
+    sliderNames.forEach(name => {
+        let slider = new Slider(this, name);
+        sliders.push(slider);
+    });
+}
+
+function create() {
+
+    // Create backgrounds
+    background = new CustomImage(this, 'fEqualsQqOver4PiEpsilon0rSquared-bg', bgConfig);
+    background.create();
+
+    //let testObject = new Test(this, 100, 100); // Starting position (100, 100)
+    //testObject.create();
+
+    // Create two charge images
+    chargeQ = new Charge(this, 'Q');
+    chargeq = new Charge(this, 'q');
+
+    // Create sliders
+    sliders.forEach(slider => slider.create());
+
+    ui = new UI(this);
+    ui.create();
+
+    calculations = new Calculations();
+    arrows = new Arrows(this);
+
+    graph = new Graph(this);
+
+    labels = new Labels(this);
+
+    visualization = new Visualization(this);
+    visualization.create();
+}
+
+function update() {
+    // no update calls
+}
+</script>
