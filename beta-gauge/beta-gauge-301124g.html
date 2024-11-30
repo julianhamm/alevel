@@ -1,0 +1,728 @@
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.15.1/dist/phaser-arcade-physics.min.js"></script>
+<script>
+
+var config = {
+    width: 1200,
+    height: 500,
+    type: Phaser.AUTO,
+    scene: {
+        preload: preload,
+        create: create,
+        update: update
+    },
+    backgroundColor: '#FFFFFF',
+    pixelArt: false // Enable texture smoothing
+};
+
+var bgConfig = {
+    scale: 1,
+    x: 0,
+    y: 0,
+    originX: 0,
+    originY: 0
+};
+
+var depthConfig = {
+    betaDetector: {
+        textBox: 15,
+        body: 10,
+        control: 12,
+        needle: 12
+    },
+    beta: 8,
+    betaSource: 10,
+    rollers: 10,
+    foil: 5
+}
+
+var rollerConfig = {
+    image: 'roller-img',
+    rollerX: 783,
+    originX: 0.5,
+    originY: 0.5,
+    rotation: 0.07, // radians per update - top roller clockwise, bottom roller anticlockwise
+    housing: {
+        topY: 181,
+        bottomY: 313
+    },
+    rollerMovement: {
+        minDisplacementFromHousingBoundary: 40,
+        travel: 30,
+        startTravelProportion: 0.5,
+        proportionIncrement: 0.005
+    }  
+}
+
+var foilConfig = {
+    leftBoundary: 0,
+    rightBoundary: 1184,
+    tint: 0xCCCCCC, // light grey
+    stockThicknessProportion: 0.9, // fraction of gap between the top and bottom roller housing
+    stock: {
+        originX: 1,
+        originY: 0.5
+    },
+    rolled: {
+        originX: 0,
+        originY: 0.5
+    },
+    wobble: {
+        amplitude: 1, // pixels
+        period: 24 // clock ticks
+    }
+}
+
+var betaDetectorConfig = {
+    body: {
+        image: 'betaDetectorBody-img',
+        x: 359,
+        y: 95,
+        originX: 0.5,
+        originY: 0.5
+    },
+    decreaseControl: {
+        xOffset: 50,
+        yOffset: 0,
+        originX: 0.5,
+        originY: 0.5,
+        dormantImage: 'decreaseControlDormant-img',
+        activeImage: 'decreaseControlActive-img'
+    },
+    increaseControl: {
+        xOffset: 80,
+        yOffset: 0,
+        originX: 0.5,
+        originY: 0.5,
+        dormantImage: 'increaseControlDormant-img',
+        activeImage: 'increaseControlActive-img'
+    },
+    needle: {
+        length: 70,
+        thickness: 2,
+        tint: 0x000000, // black
+        pivot: {
+            x: 328,
+            y: 140
+        },
+        originX: 0.5,
+        originY: 0.5,
+        fullScaleDeflection: 48 // degrees left and right
+    },
+    textBox: {
+        topLeft: {
+            x: 263.2,
+            y: 113
+        },
+        bottomRight: {
+            x: 389.5,
+            y: 143
+        },
+        backgroundTint: 0x000000, // black
+        text: {
+            tint: '#FFFFFF', // white
+            font: 'Calibri',
+            size: 14,
+            content: 'Counts / s'
+        }
+    }
+}
+
+var betaSourceConfig = {
+    body: {
+        image: 'betaSource-img',
+        x: 367,
+        y: 400,
+        originX: 0.5,
+        originY: 0.5
+    },
+    radiationStream: {
+        emissionRate: 4, // beta per tick
+        yRandom: 5,
+        left: 348,
+        right: 389,
+        start: 342,
+        end: 156
+    },
+    betaParticle: {
+        radius: 2,
+        tint: 0x000000, // black
+        absorbedTint: 0xFF0000, // red
+        originX: 0.5,
+        originY: 0.5,
+        velocity: 5
+    }
+}
+
+var info = {
+    rollers: {
+        currentProportion: null,
+        movementDirection: 'none', // can have values 'none', 'together' or 'apart'
+        topY: null,
+        bottomY: null,
+        diameter: null
+    },
+    rolledFoil: {
+        topY: null,
+        bottomY: null
+    }
+}
+
+let rollers;
+let betaDetector;
+let betaSource;
+let foil;
+let betaManager;
+
+let visualization;
+
+let game = new Phaser.Game(config);
+
+class Test {
+    constructor(scene, x, y) {
+        this.scene = scene;
+        this.x = x;
+        this.y = y;
+        this.handle = null;
+    }
+
+    create() {
+        // Create the handle image with 50% alpha
+        this.handle = this.scene.add.image(this.x, this.y, 'handle');
+        this.handle.setDepth(1000);
+        this.handle.setAlpha(0.5);
+        this.handle.setScale(0.2); // Scale the handle to 20%
+        this.handle.setInteractive({ useHandCursor: true });
+
+        // Make the handle draggable
+        this.scene.input.setDraggable(this.handle);
+
+        // Output the coordinates to the console when dragging
+        this.handle.on('drag', (pointer, dragX, dragY) => {
+            this.handle.setPosition(dragX, dragY);
+            console.log(`x: ${dragX}, y: ${dragY}`);
+        });
+    }
+}
+
+class Visualization {
+    constructor() {
+        //nothing for the moment
+    }
+
+    create() {
+        rollers.create();
+        betaDetector.create();
+        betaSource.create();
+
+        rollers.updateTravelProportion();
+        rollers.translate();
+        foil.create();
+    }
+
+    updateOnTick() {
+        rollers.rotate();
+
+        if (info.rollers.movementDirection != 'none') {
+            this.updateOnRollerTravel();
+        }
+
+        betaManager.updateBetas();
+        foil.updateStockFoilWobble();
+    }
+
+    updateOnRollerTravel() {
+        rollers.updateTravelProportion();
+        rollers.translate();
+        foil.updateRolledFoil();
+        betaDetector.updateNeedle();
+    }
+}
+
+class BetaManager {
+    constructor(scene) {
+        this.scene = scene;
+        this.betas = []; // Array to store active beta particles
+    }
+
+    create() {
+        // Initial setup if needed
+    }
+
+    emitBeta() {
+        // Generate a random X position within the source's radiation stream
+        const xPosition = Phaser.Math.Between(
+            betaSourceConfig.radiationStream.left,
+            betaSourceConfig.radiationStream.right
+        );
+
+        // Generate a random Y position with a slight variation around the start point
+        const yPosition = betaSourceConfig.radiationStream.start +
+            Phaser.Math.FloatBetween(
+                -betaSourceConfig.radiationStream.yRandom,
+                betaSourceConfig.radiationStream.yRandom
+            );
+
+        // Decide if the beta will be absorbed or pass through
+        const willBeAbsorbed = Math.random() < info.rollers.currentProportion;
+
+        // If absorbed, pre-calculate the absorption position within the foil
+        const absorptionPosition = willBeAbsorbed
+            ? Phaser.Math.FloatBetween(info.rolledFoil.topY, info.rolledFoil.bottomY)
+            : null;
+
+        // Create a new beta particle as an object with properties
+        const beta = {
+            graphics: this.scene.add.circle(
+                xPosition,
+                yPosition,
+                betaSourceConfig.betaParticle.radius,
+                betaSourceConfig.betaParticle.tint
+            ),
+            absorbed: willBeAbsorbed,
+            absorptionPosition: absorptionPosition
+        };
+        beta.graphics.setDepth(depthConfig.beta);
+
+        // Add the beta particle to the array for tracking
+        this.betas.push(beta);
+    }
+
+    updateBetas() {
+        // Emit new betas based on the emission rate
+        for (let i = 0; i < betaSourceConfig.radiationStream.emissionRate; i++) {
+            this.emitBeta();
+        }
+
+        // Update positions of all active beta particles
+        this.betas.forEach((beta, index) => {
+            // Move the beta upward
+            beta.graphics.y -= betaSourceConfig.betaParticle.velocity;
+
+            if (beta.absorbed) {
+                // Check if the beta is near its absorption position
+                const distanceToAbsorption = Math.abs(beta.graphics.y - beta.absorptionPosition);
+                if (distanceToAbsorption <= betaSourceConfig.betaParticle.radius) {
+                    // Turn the beta red as it approaches absorption
+                    beta.graphics.setFillStyle(betaSourceConfig.betaParticle.absorbedTint);
+                    beta.graphics.setScale(3);
+                }
+
+                // Check if the beta reaches its absorption position
+                if (beta.graphics.y <= beta.absorptionPosition) {
+                    beta.graphics.destroy();
+                    this.betas.splice(index, 1); // Remove from array
+                }
+            } else {
+                // Remove betas that pass through and leave the detector area
+                if (beta.graphics.y < betaSourceConfig.radiationStream.end) {
+                    beta.graphics.destroy();
+                    this.betas.splice(index, 1); // Remove from array
+                }
+            }
+        });
+    }
+
+}
+
+class Foil {
+    constructor(scene) {
+        this.scene = scene;
+        this.stockFoil = null; // The stationary stock foil
+        this.rolledFoil = null; // The dynamic rolled foil
+        this.tickCounter = 0; // Initialize the tick counter for the wobble
+    }
+
+    create() {
+        this.createStockFoil();
+        this.createRolledFoil();
+    }
+
+    createStockFoil() {
+        // Calculate the thickness of the stock foil
+        const stockFoilThickness =
+            (rollerConfig.housing.bottomY - rollerConfig.housing.topY) *
+            foilConfig.stockThicknessProportion;
+
+        // Create the stock foil rectangle
+        this.stockFoil = this.scene.add.rectangle(
+            foilConfig.rightBoundary,
+            (rollerConfig.housing.topY + rollerConfig.housing.bottomY) / 2,
+            foilConfig.rightBoundary - rollerConfig.rollerX,
+            stockFoilThickness,
+            foilConfig.tint
+        );
+
+        // Set origin and depth
+        this.stockFoil.setOrigin(foilConfig.stock.originX, foilConfig.stock.originY);
+        this.stockFoil.setDepth(depthConfig.foil);
+    }
+
+    createRolledFoil() {
+        // Initialize the rolled foil using calculated properties
+        const { thickness, yPosition } = this.calculateRolledFoilProperties();
+
+        this.rolledFoil = this.scene.add.rectangle(
+            foilConfig.leftBoundary,
+            yPosition,
+            rollerConfig.rollerX, // Width from the roller center to the far left boundary
+            thickness,
+            foilConfig.tint
+        );
+
+        // Set origin and depth
+        this.rolledFoil.setOrigin(foilConfig.rolled.originX, foilConfig.rolled.originY);
+        this.rolledFoil.setDepth(depthConfig.foil);
+    }
+
+    updateStockFoilWobble() {
+        const wobbleConfig = foilConfig.wobble;
+
+        // Increment the tick counter
+        this.tickCounter++;
+
+        // Calculate the wobble offset using a sine wave
+        const wobbleOffset =
+            wobbleConfig.amplitude * Math.sin((2 * Math.PI * this.tickCounter) / wobbleConfig.period);
+
+        // Update the stock foil's vertical position
+        const baseY = (rollerConfig.housing.topY + rollerConfig.housing.bottomY) / 2; // Initial Y position
+        this.stockFoil.setY(baseY + wobbleOffset);
+    }
+
+    updateRolledFoil() {
+        // Recalculate the properties for the rolled foil
+        const { thickness, yPosition } = this.calculateRolledFoilProperties();
+
+        // Update the rolled foil's thickness
+        this.rolledFoil.setSize(rollerConfig.rollerX, thickness);
+        this.rolledFoil.setOrigin(foilConfig.rolled.originX, foilConfig.rolled.originY); // ensure the foil is recentred between the rolloers
+
+        // Update the rolled foil's position to center it on the gap
+        //this.rolledFoil.setY(yPosition);
+    }
+
+    calculateRolledFoilProperties() {
+        // Calculate the thickness of the rolled foil based on roller separation
+        const thickness = info.rollers.bottomY - info.rollers.topY - info.rollers.diameter;
+
+        // Calculate the vertical position of the foil (center between rollers)
+        const yPosition = (info.rollers.topY + info.rollers.bottomY) / 2;
+
+        // Calculate and store the top and bottom positions of the rolled foil
+        info.rolledFoil.topY = yPosition - thickness / 2;
+        info.rolledFoil.bottomY = yPosition + thickness / 2;
+
+        return { thickness, yPosition };
+    }
+}
+
+class Rollers {
+    constructor(scene) {
+        this.scene = scene;
+        this.topRoller = null;
+        this.bottomRoller = null;
+    }
+
+    create() {
+        // Create the top roller
+        this.topRoller = this.scene.add.image(
+            rollerConfig.rollerX, 
+            rollerConfig.housing.topY - rollerConfig.rollerMovement.minDisplacementFromHousingBoundary, 
+            rollerConfig.image
+        );
+        this.topRoller.setOrigin(rollerConfig.originX, rollerConfig.originY);
+        this.topRoller.setDepth(depthConfig.rollers);
+
+        // Create the bottom roller
+        this.bottomRoller = this.scene.add.image(
+            rollerConfig.rollerX, 
+            rollerConfig.housing.bottomY + rollerConfig.rollerMovement.minDisplacementFromHousingBoundary, 
+            rollerConfig.image
+        );
+        this.bottomRoller.setOrigin(rollerConfig.originX, rollerConfig.originY);
+        this.bottomRoller.setDepth(depthConfig.rollers);
+
+        // Set the roller diameter based on the height of the roller image
+        info.rollers.diameter = this.topRoller.displayHeight;
+    }
+
+    rotate() {
+        // Rotate the top roller clockwise
+        this.topRoller.rotation += rollerConfig.rotation;
+
+        // Rotate the bottom roller counterclockwise
+        this.bottomRoller.rotation -= rollerConfig.rotation;
+    }
+
+    updateTravelProportion() {
+        // Initialize current proportion if it hasn't been set yet
+        if (info.rollers.currentProportion === null) {
+            info.rollers.currentProportion = rollerConfig.rollerMovement.startTravelProportion;
+        }
+
+        // Update proportion based on movement direction
+        if (info.rollers.movementDirection === 'apart') {
+            info.rollers.currentProportion += rollerConfig.rollerMovement.proportionIncrement;
+        } else if (info.rollers.movementDirection === 'together') {
+            info.rollers.currentProportion -= rollerConfig.rollerMovement.proportionIncrement;
+        }
+
+        // Clamp the proportion between 0 and 1
+        info.rollers.currentProportion = Math.max(0, Math.min(1, info.rollers.currentProportion));
+    }
+
+    translate() {
+        // Ensure the current proportion is initialized
+        if (info.rollers.currentProportion === null) {
+            info.rollers.currentProportion = rollerConfig.rollerMovement.startTravelProportion;
+        }
+
+        // Calculate new positions based on currentProportion
+        const topRollerNewY =
+            rollerConfig.housing.topY -
+            rollerConfig.rollerMovement.minDisplacementFromHousingBoundary -
+            rollerConfig.rollerMovement.travel * info.rollers.currentProportion;
+
+        const bottomRollerNewY =
+            rollerConfig.housing.bottomY +
+            rollerConfig.rollerMovement.minDisplacementFromHousingBoundary +
+            rollerConfig.rollerMovement.travel * info.rollers.currentProportion;
+
+        // Update the positions of the rollers
+        this.topRoller.setY(topRollerNewY);
+        this.bottomRoller.setY(bottomRollerNewY);
+
+        // Update the info object with the new positions
+        info.rollers.topY = topRollerNewY;
+        info.rollers.bottomY = bottomRollerNewY;
+    }
+
+}
+
+class BetaDetector {
+    constructor(scene) {
+        this.scene = scene;
+        this.body = null; // Background part of the detector
+        this.increaseControl = null; // Increase control button
+        this.decreaseControl = null; // Decrease control button
+        this.needle = null; // Needle for beta detection
+        this.textBox = null; // Text box for decoration
+        this.text = null; // Static text within the text box
+    }
+
+    create() {
+        this.createBody();
+        this.createIncreaseControl();
+        this.createDecreaseControl();
+        this.createNeedle();
+        this.createTextBox(); // Add the text box to the beta detector
+    }
+
+    createBody() {
+        this.body = this.scene.add.image(
+            betaDetectorConfig.body.x,
+            betaDetectorConfig.body.y,
+            betaDetectorConfig.body.image
+        );
+        this.body.setOrigin(betaDetectorConfig.body.originX, betaDetectorConfig.body.originY);
+        this.body.setDepth(depthConfig.betaDetector.body);
+    }
+
+    createIncreaseControl() {
+        this.increaseControl = this.createControl(
+            betaDetectorConfig.increaseControl,
+            'apart'
+        );
+    }
+
+    createDecreaseControl() {
+        this.decreaseControl = this.createControl(
+            betaDetectorConfig.decreaseControl,
+            'together'
+        );
+    }
+
+    createControl(controlConfig, movementDirection) {
+        const control = this.scene.add.image(
+            betaDetectorConfig.body.x + controlConfig.xOffset,
+            betaDetectorConfig.body.y + controlConfig.yOffset,
+            controlConfig.dormantImage
+        );
+        control.setOrigin(controlConfig.originX, controlConfig.originY);
+        control.setInteractive({ useHandCursor: true });
+        control.setDepth(depthConfig.betaDetector.control);
+
+        // Change to active image when clicked and held
+        control.on('pointerdown', () => {
+            control.setTexture(controlConfig.activeImage);
+            info.rollers.movementDirection = movementDirection;
+        });
+
+        // Revert to dormant image when mouse button is released
+        control.on('pointerup', () => {
+            control.setTexture(controlConfig.dormantImage);
+            info.rollers.movementDirection = 'none';
+        });
+
+        return control;
+    }
+
+    createNeedle() {
+        const needleConfig = betaDetectorConfig.needle;
+
+        // Create the graphics object for the needle
+        this.needle = this.scene.add.graphics();
+        this.needle.lineStyle(needleConfig.thickness, needleConfig.tint);
+
+        // Draw the line from the pivot to the tip
+        this.needle.beginPath();
+        this.needle.moveTo(0, 0); // Start at the pivot
+        this.needle.lineTo(0, -needleConfig.length); // Draw upwards by length
+        this.needle.strokePath();
+
+        // Position the needle at the pivot point
+        this.needle.setPosition(needleConfig.pivot.x, needleConfig.pivot.y);
+
+        // Set the depth to ensure it's above or below other elements as needed
+        this.needle.setDepth(depthConfig.betaDetector.needle);
+
+        // Set rotation to neutral (pointing up) as a starting position
+        this.needle.rotation = 0;
+    }
+
+    createTextBox() {
+        const textBoxConfig = betaDetectorConfig.textBox;
+
+        // Calculate the dimensions of the rectangle
+        const width = textBoxConfig.bottomRight.x - textBoxConfig.topLeft.x;
+        const height = textBoxConfig.bottomRight.y - textBoxConfig.topLeft.y;
+
+        // Calculate the center position of the rectangle
+        const centerX = (textBoxConfig.topLeft.x + textBoxConfig.bottomRight.x) / 2;
+        const centerY = (textBoxConfig.topLeft.y + textBoxConfig.bottomRight.y) / 2;
+
+        // Create the rectangle for the background
+        this.textBox = this.scene.add.rectangle(
+            centerX,
+            centerY,
+            width,
+            height,
+            textBoxConfig.backgroundTint // Color
+        );
+        this.textBox.setDepth(depthConfig.betaDetector.textBox);
+
+        // Add the static text overlay
+        this.text = this.scene.add.text(
+            centerX, // Center the text horizontally
+            centerY, // Center the text vertically
+            textBoxConfig.text.content, // The static content
+            {
+                fontFamily: textBoxConfig.text.font,
+                fontSize: textBoxConfig.text.size + 'px',
+                color: textBoxConfig.text.tint
+            }
+        );
+
+        // Center the text relative to its origin
+        this.text.setOrigin(0.5, 0.5);
+        this.text.setDepth(depthConfig.betaDetector.textBox);
+    }
+
+    updateNeedle() {
+        const needleConfig = betaDetectorConfig.needle;
+
+        // Calculate the needle angle based on current proportion
+        const angle = Phaser.Math.Linear(
+            needleConfig.fullScaleDeflection, // Minimum deflection (left)
+            -needleConfig.fullScaleDeflection,  // Maximum deflection (right)
+            info.rollers.currentProportion     // Current proportion (0 to 1)
+        );
+
+        // Update the needle rotation (convert angle to radians)
+        this.needle.rotation = Phaser.Math.DegToRad(angle);
+    }
+}
+
+class BetaSource {
+    constructor(scene) {
+        this.scene = scene;
+        this.body = null; // Background part of the detector
+    } 
+    
+    create() {
+        // Create the detector background (body)
+        this.body = this.scene.add.image(
+            betaSourceConfig.body.x,
+            betaSourceConfig.body.y,
+            betaSourceConfig.body.image
+        );
+        this.body.setOrigin(betaSourceConfig.body.originX, betaSourceConfig.body.originY);
+        this.body.setDepth(depthConfig.betaSource);
+    }   
+}
+
+class CustomImage {
+    constructor(scene, imageName, configRef){
+        this.scene = scene;
+        this.imageName = imageName;
+        this.configRef = configRef;
+    }
+
+    create(){
+        this.image = this.scene.add.image(this.configRef.x, this.configRef.y, this.imageName);
+        this.image.setScale(this.configRef.scale);
+        this.image.setOrigin(this.configRef.originX, this.configRef.originY);
+    }
+
+    setPosition(x, y) {
+        this.image.setPosition(x, y);
+    }
+
+    setVisible(visible) {
+        this.image.setVisible(visible);
+    }
+}
+
+function preload() {
+    // Load background
+    this.load.image('thicknessGauge-bg', 'thicknessGauge_bg.PNG'); // upper case png is important for GitHub
+
+    // handle is used for the test object
+    this.load.image('handle', 'handle.PNG');
+
+    // image assets
+    this.load.image('roller-img', 'roller_img.png');
+    this.load.image('betaDetectorBody-img', 'betaDetectorBody_img.png');
+    this.load.image('betaSource-img', 'betaSource_img.png');
+
+    this.load.image('decreaseControlDormant-img', 'decreaseControlDormant_img.png');
+    this.load.image('decreaseControlActive-img', 'decreaseControlActive_img.png');
+
+    this.load.image('increaseControlDormant-img', 'increaseControlDormant_img.png');
+    this.load.image('increaseControlActive-img', 'increaseControlActive_img.png');
+
+}
+
+function create() {
+
+    // Create backgrounds
+    background = new CustomImage(this, 'thicknessGauge-bg', bgConfig);
+    background.create();
+
+    //let testObject = new Test(this, 100, 100); // Starting position (100, 100)
+    //testObject.create();
+
+    rollers = new Rollers(this);
+    betaDetector = new BetaDetector(this);
+    foil = new Foil(this);
+    betaSource = new BetaSource(this);
+    betaManager = new BetaManager(this);
+
+    visualization = new Visualization();
+    visualization.create();
+}
+
+function update() {
+    visualization.updateOnTick();
+}
+</script>
