@@ -1,0 +1,356 @@
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.15.1/dist/phaser-arcade-physics.min.js"></script>
+<script>
+
+var config = {
+    width: 800,
+    height: 550,
+    type: Phaser.WEBGL,
+    scene: {
+        create: initialise,
+    },
+    backgroundColor: '#FFFFFF'
+};
+
+var circuitConfig = {
+    overallDimensions: {
+        topLeftX: 100,
+        topLeftY: 100,
+        width: 500,
+        height: 300,
+        middle: 250
+    },
+    thicknessNudge: 2
+}
+
+circuitConfig.bulb1 = {
+    x: 450,
+    y: circuitConfig.overallDimensions.middle,
+    radius: 40
+};
+
+circuitConfig.bulb2 = {
+    x: 450,
+    y: circuitConfig.overallDimensions.topLeftY + circuitConfig.overallDimensions.height,
+    radius: 40
+};
+
+circuitConfig.cell = {
+    x: circuitConfig.overallDimensions.topLeftX + circuitConfig.overallDimensions.width/2,
+    y: circuitConfig.overallDimensions.topLeftY
+}
+
+circuitConfig.switch1 = {
+    x: circuitConfig.overallDimensions.topLeftX,
+    y: 170,
+    orientation: 'vertical',
+    gap: 70,
+    terminalRadius: 7
+}
+
+circuitConfig.switch2 = {
+    x: 200,
+    y: circuitConfig.overallDimensions.middle,
+    orientation: 'horizontal',
+    gap: 70,
+    terminalRadius: 7
+}
+
+circuitConfig.switch3 = {
+    x: 200,
+    y: circuitConfig.overallDimensions.topLeftY + circuitConfig.overallDimensions.height,
+    orientation: 'horizontal',
+    gap: 70,
+    terminalRadius: 7
+}
+
+circuitConfig.glow = {
+    brightRadius: 100,
+    dimRadius: 65
+}
+
+var simpleCircuit;
+var ui;
+
+class Circuit {
+
+    constructor(context, phaser) {
+        this.context = context; // set the context
+        this.phaser = phaser; // work if Phaser is called something different
+        this.lineGraphics = context.add.graphics({x: 0, y: 0}).setDepth(-10);
+        this.componentGraphics = context.add.graphics({x: 0, y: 0}).setDepth(-5);
+        //this.glowGraphics = context.add.graphics({x: 0, y: 0}).setDepth(-2);
+        this.switchStates = {};
+    }
+
+    createWires(){
+
+        this.lineGraphics.clear();
+
+        this.lineGraphics.lineStyle(4, 0x000000);
+
+        //top
+        const topLeftX = circuitConfig.overallDimensions.topLeftX;
+        const topLeftY = circuitConfig.overallDimensions.topLeftY;
+
+        const bottomRightX = topLeftX + circuitConfig.overallDimensions.width;
+        const bottomRightY = topLeftY + circuitConfig.overallDimensions.height;
+
+        const middle = circuitConfig.overallDimensions.middle;
+
+        const thicknessNudge = circuitConfig.thicknessNudge;//so lines abutt corners neatly
+
+        this.lineGraphics.lineBetween(topLeftX, topLeftY, bottomRightX, topLeftY);
+        this.lineGraphics.lineBetween(bottomRightX - thicknessNudge, topLeftY, bottomRightX - thicknessNudge, bottomRightY);
+        this.lineGraphics.lineBetween(bottomRightX, bottomRightY, topLeftX, bottomRightY);
+        this.lineGraphics.lineBetween(topLeftX + thicknessNudge, bottomRightY, topLeftX + thicknessNudge, topLeftY);
+
+        //draw middle wire
+        this.lineGraphics.lineBetween(topLeftX, middle, bottomRightX, middle);
+
+    }
+
+    addBulb(bulbID = 1) {
+        const bulb = circuitConfig[`bulb${bulbID}`];
+
+        if (bulb) {
+            // Fill the circle with white
+            this.componentGraphics.fillStyle(0xFFFFFF, 1);
+            this.componentGraphics.fillCircle(bulb.x, bulb.y, bulb.radius);
+
+            // Draw the circle outline
+            this.componentGraphics.lineStyle(4, 0x000000); // Set the line color to black
+            this.componentGraphics.strokeCircle(bulb.x, bulb.y, bulb.radius);
+
+            // Draw the crossed lines inside the circle
+            const lineLength = bulb.radius * Math.sqrt(2); // length of the line segment inside the circle
+
+            // Line from top-left to bottom-right
+            this.componentGraphics.lineBetween(
+                bulb.x - lineLength / 2, bulb.y - lineLength / 2,
+                bulb.x + lineLength / 2, bulb.y + lineLength / 2
+            );
+
+            // Line from bottom-left to top-right
+            this.componentGraphics.lineBetween(
+                bulb.x - lineLength / 2, bulb.y + lineLength / 2,
+                bulb.x + lineLength / 2, bulb.y - lineLength / 2
+            );
+
+            // Add glow effect
+            this[`bulb${bulbID}Glow`] = this.context.add.graphics();
+            this[`bulb${bulbID}Glow`].fillStyle(0xFFFF00, 0.5); // Semi-transparent yellow
+            this[`bulb${bulbID}Glow`].fillCircle(bulb.x, bulb.y, circuitConfig.glow.dimRadius);
+            this[`bulb${bulbID}Glow`].setVisible(true).setDepth(-7); // Initially on
+
+        }
+    }
+
+    addCell(){
+         const cell = circuitConfig.cell;
+
+         const positiveHeight = 80;
+         const negativeHeight = 40;
+
+         const gap = 17;
+
+         //'erase' the wire between the cell terminals
+         this.componentGraphics.lineStyle(4, 0xFFFFFF);
+         this.componentGraphics.lineBetween(cell.x - gap/2, cell.y, cell.x + gap/2, cell.y);
+
+         //draw the positive terminal
+         this.componentGraphics.lineStyle(4, 0x000000);
+         this.componentGraphics.lineBetween(cell.x - gap/2, cell.y - positiveHeight/2, cell.x - gap/2, cell.y + positiveHeight/2);
+         
+         //draw the negative terminal
+         this.componentGraphics.lineStyle(8, 0x000000);
+         this.componentGraphics.lineBetween(cell.x + gap/2, cell.y - negativeHeight/2, cell.x + gap/2, cell.y + negativeHeight/2);
+    }
+
+    addSwitch(switchID = 1){
+
+        const circuitSwitch = circuitConfig[`switch${switchID}`];
+        const gap = circuitSwitch.gap;
+        const terminalRadius = circuitSwitch.terminalRadius;
+        let openGap = 30;
+
+        let top;
+        let bottom;
+        let left;
+        let right;
+        let verticalPosition;
+        let switchX;
+        let hitWidth;
+        let hitHeight;
+
+        let hitArea;
+
+        if(circuitSwitch.orientation === 'vertical'){
+
+            top = circuitSwitch.y - gap/2;
+            bottom = circuitSwitch.y + gap/2;
+            switchX = circuitSwitch.x + circuitConfig.thicknessNudge;
+            hitWidth = 50;
+            hitHeight = gap;
+
+            //'erase' the wire between the switch terminals
+            this.componentGraphics.lineStyle(4, 0xFFFFFF);
+            this.componentGraphics.lineBetween(switchX, top, switchX, bottom);
+
+            //add top and bottom terminus
+            this.componentGraphics.fillStyle(0xFFFFFF, 1);
+            this.componentGraphics.fillCircle(switchX, top, terminalRadius);
+            this.componentGraphics.fillCircle(switchX, bottom, terminalRadius);
+            this.componentGraphics.lineStyle(4, 0x000000); // Set the line color to black
+            this.componentGraphics.strokeCircle(switchX, top, terminalRadius);
+            this.componentGraphics.strokeCircle(switchX, bottom, terminalRadius);
+
+            // Create hit area for the switch
+            hitArea = this.context.add.rectangle(switchX - hitWidth/2, top + gap/2, hitWidth, hitHeight);
+
+            // Add closed switch line
+            //this[`switch${switchID}Closed`] = this.context.add.line(0, 0, switchX + circuitConfig.thicknessNudge, bottom + gap/2 - terminalRadius, switchX - terminalRadius + circuitConfig.thicknessNudge, top + gap/2 - terminalRadius, 0x000000).setLineWidth(2).setDepth(3);
+            this[`switch${switchID}Closed`] = this.context.add.line(0, 0, switchX + circuitConfig.thicknessNudge, bottom + gap/2 - terminalRadius, switchX - terminalRadius + circuitConfig.thicknessNudge, top + gap/2 - terminalRadius, 0x000000).setLineWidth(2);     
+
+            // Add open switch line
+            //this[`switch${switchID}Open`] = this.context.add.line(openGap/2 - terminalRadius, 0, switchX + circuitConfig.thicknessNudge, bottom + gap/2 - terminalRadius, switchX - openGap, top + gap/2 - terminalRadius + openGap/4, 0x000000).setLineWidth(2).setDepth(3);
+            this[`switch${switchID}Open`] = this.context.add.line(openGap/2 - terminalRadius, 0, switchX + circuitConfig.thicknessNudge, bottom + gap/2 - terminalRadius, switchX - openGap, top + gap/2 - terminalRadius + openGap/4, 0x000000).setLineWidth(2);
+
+        } else if (circuitSwitch.orientation === 'horizontal') {
+
+            verticalPosition = circuitSwitch.y;
+            left = circuitSwitch.x;
+            right = left + gap;
+            hitWidth = gap;
+            hitHeight = 40;
+
+            //'erase' the wire between the switch terminals
+            this.componentGraphics.lineStyle(4, 0xFFFFFF);
+            this.componentGraphics.lineBetween(left, verticalPosition, right, verticalPosition);
+
+            //add left and right terminus
+            this.componentGraphics.fillStyle(0xFFFFFF, 1);
+            this.componentGraphics.fillCircle(left, verticalPosition, terminalRadius);
+            this.componentGraphics.fillCircle(right, verticalPosition, terminalRadius);
+            this.componentGraphics.lineStyle(4, 0x000000); // Set the line color to black
+            this.componentGraphics.strokeCircle(left, verticalPosition, terminalRadius);
+            this.componentGraphics.strokeCircle(right, verticalPosition, terminalRadius);
+
+            // Create hit area for the switch
+            hitArea = this.context.add.rectangle(left, verticalPosition - hitHeight/2, hitWidth, hitHeight);
+
+            // Add closed switch line
+            let x1 = left + terminalRadius;
+            let y1 = verticalPosition;
+            let x2 = right + terminalRadius;
+            let y2 = verticalPosition - terminalRadius;
+
+            let halfX = (x2 - x1)/2;
+            let halfY = (y1 - y2)/2;
+
+            let midX = x1 + halfX;
+            let midY = y1 - halfY;
+
+            //this[`switch${switchID}Closed`] = this.context.add.line(midX + halfX, midY, 0 - halfX, halfY, halfX, 0 - halfY, 0x000000).setLineWidth(2).setDepth(3);
+            this[`switch${switchID}Closed`] = this.context.add.line(midX + halfX, midY, 0 - halfX, halfY, halfX, 0 - halfY, 0x000000).setLineWidth(2);
+
+            openGap = 20;
+
+            y1 = verticalPosition + terminalRadius*3;
+            y2 = verticalPosition - openGap;
+            x2 = right - openGap/3;
+
+            halfX = (x2 - x1)/2;
+            halfY = (y1 - y2)/2;
+
+            midX = x1 + halfX;
+            midY = y1 - halfY;
+
+            // Add open switch line
+            //this[`switch${switchID}Open`] = this.context.add.line(midX + halfX, midY, 0 - halfX, halfY, halfX, 0 - halfY, 0x000000).setLineWidth(2).setDepth(3);
+            this[`switch${switchID}Open`] = this.context.add.line(midX + halfX, midY, 0 - halfX, halfY, halfX, 0 - halfY, 0x000000).setLineWidth(2);
+        }
+
+        hitArea.setInteractive({ cursor: 'pointer' });
+
+        // Set cursor style on hover
+        hitArea.on('pointerover', () => {
+            this.context.input.setDefaultCursor('pointer');
+        });
+
+        // Set default cursor when not hovering
+        hitArea.on('pointerout', () => {
+            this.context.input.setDefaultCursor('auto');
+        });
+
+        // Optionally, handle click events on the hit area
+        hitArea.on('pointerdown', () => {
+
+            if (this.switchStates[switchID] === 'closed'){
+
+                this.switchStates[switchID] = 'open';
+
+            } else if (this.switchStates[switchID] === 'open'){
+
+                this.switchStates[switchID] = 'closed';
+            }
+
+            this.handleSwitch(switchID, this.switchStates[switchID]);
+        });
+
+        // Set initial visibility
+        this[`switch${switchID}Closed`].setVisible(true);
+        this[`switch${switchID}Open`].setVisible(false);
+
+        // Initialize the switch state
+        this.switchStates[switchID] = 'closed';
+
+    }
+
+    handleSwitch(switchID = 1, state = 'closed'){
+
+        if (state === 'closed'){
+            this[`switch${switchID}Open`].setVisible(false);
+            this[`switch${switchID}Closed`].setVisible(true);
+
+        } else if (state === 'open'){
+            this[`switch${switchID}Closed`].setVisible(false);
+            this[`switch${switchID}Open`].setVisible(true);
+        }
+
+
+        this.handleBulbs();
+    }
+
+    handleBulbs(){
+
+        if (this.switchStates[1] === 'closed' && this.switchStates[2] === 'closed'){
+            simpleCircuit[`bulb1Glow`].setAlpha(1);
+        } else {
+            simpleCircuit[`bulb1Glow`].setAlpha(0.01);
+        }
+
+        if (this.switchStates[1] === 'closed' && this.switchStates[3] === 'closed'){
+            simpleCircuit[`bulb2Glow`].setAlpha(1);
+        } else {
+            simpleCircuit[`bulb2Glow`].setAlpha(0.01);
+        }       
+    }
+
+}
+
+new Phaser.Game(config);
+
+function initialise() {
+
+    simpleCircuit = new Circuit(this, Phaser);
+    simpleCircuit.createWires();
+    simpleCircuit.addBulb(1);
+    simpleCircuit.addBulb(2);
+    simpleCircuit.addCell();
+    simpleCircuit.addSwitch(3);//between bulbs
+    simpleCircuit.addSwitch(1);//left
+    simpleCircuit.addSwitch(2);//right
+
+}
+
+</script>
